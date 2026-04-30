@@ -205,6 +205,81 @@ def train_step(drafter, target_policy, target_comp, batch, preprocessor, drafter
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
+def per_position_accuracy(drafter, target_policy, target_comp, preprocessor, drafter_cfg):
+    """Per-position next-token argmax accuracy on the val split (eval distribution).
+
+    Diagnostic mirror of evaluate_acceptance_length but reporting marginal accuracy
+    for each predicted position k=1..B-1 instead of the cumprod-prefix metric.
+    """
+    was_training = drafter.training
+    drafter.eval()
+    embed_tokens = target_comp["embed_tokens"]
+    lm_head      = target_comp["lm_head"]
+    val_loader = make_dataloader(
+        make_dataset("val"),
+        batch_size=EVAL_BATCH_SIZE,
+        num_workers=2,
+        shuffle=False,
+    )
+    val_iter = iter(val_loader)
+    block_size = drafter.block_size
+    correct = torch.zeros(block_size - 1, dtype=torch.float64, device="cuda")
+    total = torch.zeros(block_size - 1, dtype=torch.float64, device="cuda")
+    rng_state = torch.get_rng_state()
+    torch.manual_seed(EVAL_SEED)
+    try:
+        for _ in range(EVAL_BATCHES):
+            try:
+                batch = next(val_iter)
+            except StopIteration:
+                break
+            batch = preprocessor(batch)
+            target_out = target_forward_with_hidden_states(target_policy, batch)
+            fast_hiddens = fast_hidden_at_action_positions(
+                target_out["hidden_states"], target_out["fast_offset"]
+            )
+            true_tokens = target_out["fast_token_ids"]
+            true_mask   = target_out["fast_token_mask"]
+            B, T = true_tokens.shape
+            if T < block_size + 1:
+                continue
+            max_start = T - block_size
+            starts = torch.randint(0, max_start, (B,), device=true_tokens.device)
+            block_ids = torch.full((B, block_size), drafter.mask_token_id,
+                                   dtype=torch.long, device=true_tokens.device)
+            for b in range(B):
+                block_ids[b, 0] = true_tokens[b, starts[b]]
+            ctx = extract_context_feature(fast_hiddens, drafter.target_layer_ids)
+            ctx_blocks = torch.stack(
+                [ctx[b, starts[b]:starts[b] + block_size] for b in range(B)], dim=0
+            )
+            noise_emb = embed_tokens(block_ids)
+            block_positions = torch.arange(block_size, device=block_ids.device)
+            position_ids = block_positions.repeat(2)[None].expand(B, -1)
+            h = drafter(
+                target_hidden=ctx_blocks, noise_embedding=noise_emb,
+                position_ids=position_ids, past_key_values=None,
+                use_cache=False, is_causal=False,
+            )
+            pred = lm_head(h).argmax(dim=-1)
+            true_block = torch.stack(
+                [true_tokens[b, starts[b]:starts[b] + block_size] for b in range(B)], dim=0
+            )
+            valid_block = torch.stack(
+                [true_mask[b, starts[b]:starts[b] + block_size] for b in range(B)], dim=0
+            )
+            match = (pred[:, :-1] == true_block[:, 1:]).float()
+            valid = valid_block[:, 1:].float() * valid_block[:, 0:1].float()
+            correct += (match * valid).sum(dim=0).double()
+            total   += valid.sum(dim=0).double()
+    finally:
+        torch.set_rng_state(rng_state)
+        if was_training:
+            drafter.train()
+    return (correct / total.clamp(min=1)).cpu().tolist()
+
+
+@torch.no_grad()
 def evaluate_loss(drafter, target_policy, target_comp, preprocessor, drafter_cfg):
     """Mean masked-block CE loss over EVAL_BATCHES of the val split."""
     was_training = drafter.training
@@ -399,6 +474,8 @@ def main():
     print(f"  eval_loss: {eval_loss:.4f}")
     print("Evaluating acceptance length...")
     accept_len = evaluate_acceptance_length(drafter, target_policy, preprocessor)
+    pos_acc = per_position_accuracy(drafter, target_policy, target_comp, preprocessor, drafter_cfg)
+    print(f"  per_position_acc: {[f'{p:.3f}' for p in pos_acc]}")
     eval_seconds = time.time() - eval_t0
 
     peak_vram_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
