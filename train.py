@@ -86,10 +86,10 @@ def make_drafter(target_policy, drafter_cfg: DrafterConfig) -> DFlashDraftModel:
     pg_tok = target["paligemma_tokenizer"]
     vocab_size = target["embed_tokens"].weight.shape[0]
 
-    # PaliGemma has no dedicated mask token — repurpose <pad>. Any reserved
-    # never-emitted id works; the drafter just needs a stable embedding for
-    # "this position is to be denoised."
-    mask_token_id = pg_tok.pad_token_id
+    # PaliGemma has no dedicated mask token. Use BOS instead of PAD: PAD's
+    # embedding is near-zero (its job is to be ignored), so it gives a weak
+    # residual stream at masked positions. BOS has a real, learned embedding.
+    mask_token_id = pg_tok.bos_token_id
 
     cfg = Qwen3Config(
         vocab_size=vocab_size,
