@@ -1,389 +1,497 @@
 """
-One-time data preparation for autoresearch experiments.
-Downloads data shards and trains a BPE tokenizer.
+One-time data and model preparation for autoresearch experiments.
+
+Task: train a DFlash-style block-diffusion **drafter** for the autoregressive
+pi0-fast VLA. The target (pi0-fast) is frozen; the drafter is trained to
+predict blocks of FAST action tokens in parallel, conditioned on the target's
+intermediate hidden states. The fixed metric is mean acceptance length under
+teacher-forced verification.
+
+Mirrors the role of the original LM-training prepare.py: fixed constants,
+one-time download of artifacts, runtime utilities (dataloader, target forward,
+eval) imported by train.py. Not modified by the agent.
+
+Downloads:
+- lerobot/libero                  (LIBERO demonstrations)
+- lerobot/pi0fast_base            (target VLA, PaliGemma-Gemma backbone)
+- lerobot/fast-action-tokenizer   (FAST action tokenizer)
+- google/paligemma-3b-pt-224      (PaliGemma text tokenizer / image processor)
 
 Usage:
-    python prepare.py                  # full prep (download + tokenizer)
-    python prepare.py --num-shards 8   # download only 8 shards (for testing)
+    python prepare.py                  # full prep (data + model + tokenizers)
+    python prepare.py --skip-data
+    python prepare.py --skip-model
 
-Data and tokenizer are stored in ~/.cache/autoresearch/.
+Caches under ~/.cache/autoresearch/. Sets HF_HOME and MUJOCO_GL there so HF
+artifacts and the LIBERO sim (headless EGL) are pinned to the same place.
+
+Assumes the vendored ./lerobot package is installed (e.g. `uv pip install
+-e ./lerobot[pi,libero]`) and the vendored ./dflash package is on the path
+(`uv pip install -e ./dflash[transformers]`). Single CUDA GPU is assumed.
 """
 
 import os
-import sys
-import time
-import math
-import argparse
-import pickle
-from multiprocessing import Pool
 
-import requests
-import pyarrow.parquet as pq
-import rustbpe
-import tiktoken
+# ---------------------------------------------------------------------------
+# Cache paths and environment (must be set before any HF / MuJoCo import)
+# ---------------------------------------------------------------------------
+
+CACHE_DIR     = os.path.join(os.path.expanduser("~"), ".cache", "autoresearch")
+DATA_DIR      = os.path.join(CACHE_DIR, "data")
+MODELS_DIR    = os.path.join(CACHE_DIR, "models")
+HF_CACHE_DIR  = os.path.join(CACHE_DIR, "huggingface")
+
+os.environ.setdefault("HF_HOME", HF_CACHE_DIR)
+os.environ.setdefault("HF_HUB_CACHE", os.path.join(HF_CACHE_DIR, "hub"))
+os.environ.setdefault("MUJOCO_GL", "egl")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
+import argparse
+import time
+from contextlib import nullcontext
+
 import torch
 
 # ---------------------------------------------------------------------------
 # Constants (fixed, do not modify)
 # ---------------------------------------------------------------------------
 
-MAX_SEQ_LEN = 2048       # context length
-TIME_BUDGET = 300        # training time budget in seconds (5 minutes)
-EVAL_TOKENS = 40 * 524288  # number of tokens for val eval
+TIME_BUDGET = 300                # training time budget in seconds (5 minutes)
+
+# Hub artifacts — match docs/source/pi0fast.mdx LIBERO recipe
+DATASET_REPO_ID    = "lerobot/libero"
+PRETRAINED_POLICY  = "lerobot/pi0fast-base"
+ACTION_TOKENIZER   = "lerobot/fast-action-tokenizer"
+TEXT_TOKENIZER     = "google/paligemma-3b-pt-224"
+
+# Pi0-Fast target settings (match the published LIBERO finetune)
+CHUNK_SIZE         = 10
+N_ACTION_STEPS     = 10
+MAX_ACTION_TOKENS  = 256
+EMPTY_CAMERAS      = 1
+DTYPE              = "bfloat16"
+GRADIENT_CKPT      = False        # target is frozen; no need
+CONTROL_MODE       = "relative"
+
+# Gemma-2B backbone shape (used to size the drafter)
+TARGET_HIDDEN_SIZE     = 2048
+TARGET_NUM_LAYERS      = 18
+
+# Acceptance-length eval (the fixed metric — DO NOT change in train.py)
+EVAL_BATCHES           = 16       # held-out batches drawn from val split
+EVAL_BATCH_SIZE        = 2
+EVAL_SEED              = 0
+
+# Optional end-to-end LIBERO eval (opt-in; not the fixed metric)
+LIBERO_EVAL_SUITES              = ("libero_object",)
+LIBERO_EVAL_EPISODES_PER_TASK   = 1
+LIBERO_EVAL_BATCH_SIZE          = 1
+LIBERO_EVAL_MAX_PARALLEL_TASKS  = 1
+
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Download
 # ---------------------------------------------------------------------------
 
-CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "autoresearch")
-DATA_DIR = os.path.join(CACHE_DIR, "data")
-TOKENIZER_DIR = os.path.join(CACHE_DIR, "tokenizer")
-BASE_URL = "https://huggingface.co/datasets/karpathy/climbmix-400b-shuffle/resolve/main"
-MAX_SHARD = 6542 # the last datashard is shard_06542.parquet
-VAL_SHARD = MAX_SHARD  # pinned validation shard (shard_06542)
-VAL_FILENAME = f"shard_{VAL_SHARD:05d}.parquet"
-VOCAB_SIZE = 8192
-
-# BPE split pattern (GPT-4 style, with \p{N}{1,2} instead of {1,3})
-SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,2}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
-
-SPECIAL_TOKENS = [f"<|reserved_{i}|>" for i in range(4)]
-BOS_TOKEN = "<|reserved_0|>"
-
-# ---------------------------------------------------------------------------
-# Data download
-# ---------------------------------------------------------------------------
-
-def download_single_shard(index):
-    """Download one parquet shard with retries. Returns True on success."""
-    filename = f"shard_{index:05d}.parquet"
-    filepath = os.path.join(DATA_DIR, filename)
-    if os.path.exists(filepath):
-        return True
-
-    url = f"{BASE_URL}/{filename}"
-    max_attempts = 5
-    for attempt in range(1, max_attempts + 1):
-        try:
-            response = requests.get(url, stream=True, timeout=30)
-            response.raise_for_status()
-            temp_path = filepath + ".tmp"
-            with open(temp_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if chunk:
-                        f.write(chunk)
-            os.rename(temp_path, filepath)
-            print(f"  Downloaded {filename}")
-            return True
-        except (requests.RequestException, IOError) as e:
-            print(f"  Attempt {attempt}/{max_attempts} failed for {filename}: {e}")
-            for path in [filepath + ".tmp", filepath]:
-                if os.path.exists(path):
-                    try:
-                        os.remove(path)
-                    except OSError:
-                        pass
-            if attempt < max_attempts:
-                time.sleep(2 ** attempt)
-    return False
+def _ensure_dirs():
+    for d in (CACHE_DIR, DATA_DIR, MODELS_DIR, HF_CACHE_DIR):
+        os.makedirs(d, exist_ok=True)
 
 
-def download_data(num_shards, download_workers=8):
-    """Download training shards + pinned validation shard."""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    num_train = min(num_shards, MAX_SHARD)
-    ids = list(range(num_train))
-    if VAL_SHARD not in ids:
-        ids.append(VAL_SHARD)
-
-    # Count what's already downloaded
-    existing = sum(1 for i in ids if os.path.exists(os.path.join(DATA_DIR, f"shard_{i:05d}.parquet")))
-    if existing == len(ids):
-        print(f"Data: all {len(ids)} shards already downloaded at {DATA_DIR}")
-        return
-
-    needed = len(ids) - existing
-    print(f"Data: downloading {needed} shards ({existing} already exist)...")
-
-    workers = max(1, min(download_workers, needed))
-    with Pool(processes=workers) as pool:
-        results = pool.map(download_single_shard, ids)
-
-    ok = sum(1 for r in results if r)
-    print(f"Data: {ok}/{len(ids)} shards ready at {DATA_DIR}")
-
-# ---------------------------------------------------------------------------
-# Tokenizer training
-# ---------------------------------------------------------------------------
-
-def list_parquet_files():
-    """Return sorted list of parquet file paths in the data directory."""
-    files = sorted(f for f in os.listdir(DATA_DIR) if f.endswith(".parquet") and not f.endswith(".tmp"))
-    return [os.path.join(DATA_DIR, f) for f in files]
-
-
-def text_iterator(max_chars=1_000_000_000, doc_cap=10_000):
-    """Yield documents from training split (all shards except pinned val shard)."""
-    parquet_paths = [p for p in list_parquet_files() if not p.endswith(VAL_FILENAME)]
-    nchars = 0
-    for filepath in parquet_paths:
-        pf = pq.ParquetFile(filepath)
-        for rg_idx in range(pf.num_row_groups):
-            rg = pf.read_row_group(rg_idx)
-            for text in rg.column("text").to_pylist():
-                doc = text[:doc_cap] if len(text) > doc_cap else text
-                nchars += len(doc)
-                yield doc
-                if nchars >= max_chars:
-                    return
-
-
-def train_tokenizer():
-    """Train BPE tokenizer using rustbpe, save as tiktoken pickle."""
-    tokenizer_pkl = os.path.join(TOKENIZER_DIR, "tokenizer.pkl")
-    token_bytes_path = os.path.join(TOKENIZER_DIR, "token_bytes.pt")
-
-    if os.path.exists(tokenizer_pkl) and os.path.exists(token_bytes_path):
-        print(f"Tokenizer: already trained at {TOKENIZER_DIR}")
-        return
-
-    os.makedirs(TOKENIZER_DIR, exist_ok=True)
-
-    parquet_files = list_parquet_files()
-    if len(parquet_files) < 2:
-        print("Tokenizer: need at least 2 data shards (1 train + 1 val). Download more data first.")
-        sys.exit(1)
-
-    # --- Train with rustbpe ---
-    print("Tokenizer: training BPE tokenizer...")
+def download_dataset():
+    from huggingface_hub import snapshot_download
+    print(f"Data: downloading {DATASET_REPO_ID}...")
     t0 = time.time()
+    path = snapshot_download(
+        repo_id=DATASET_REPO_ID, repo_type="dataset",
+        cache_dir=os.path.join(HF_CACHE_DIR, "hub"),
+    )
+    print(f"Data: ready in {time.time() - t0:.1f}s at {path}")
 
-    tokenizer = rustbpe.Tokenizer()
-    vocab_size_no_special = VOCAB_SIZE - len(SPECIAL_TOKENS)
-    tokenizer.train_from_iterator(text_iterator(), vocab_size_no_special, pattern=SPLIT_PATTERN)
 
-    # Build tiktoken encoding from trained merges
-    pattern = tokenizer.get_pattern()
-    mergeable_ranks = {bytes(k): v for k, v in tokenizer.get_mergeable_ranks()}
-    tokens_offset = len(mergeable_ranks)
-    special_tokens = {name: tokens_offset + i for i, name in enumerate(SPECIAL_TOKENS)}
-    enc = tiktoken.Encoding(
-        name="rustbpe",
-        pat_str=pattern,
-        mergeable_ranks=mergeable_ranks,
-        special_tokens=special_tokens,
+def download_model():
+    from huggingface_hub import snapshot_download
+    for repo_id in (PRETRAINED_POLICY, ACTION_TOKENIZER, TEXT_TOKENIZER):
+        print(f"Model: downloading {repo_id}...")
+        t0 = time.time()
+        path = snapshot_download(
+            repo_id=repo_id, repo_type="model",
+            cache_dir=os.path.join(HF_CACHE_DIR, "hub"),
+        )
+        print(f"Model: {repo_id} ready in {time.time() - t0:.1f}s at {path}")
+
+
+# ---------------------------------------------------------------------------
+# Dataset / dataloader
+# ---------------------------------------------------------------------------
+
+def _resolve_delta_timestamps(ds_meta):
+    from lerobot.utils.constants import ACTION
+    return {ACTION: [i / ds_meta.fps for i in range(CHUNK_SIZE)]}
+
+
+def make_dataset(split: str = "train"):
+    """Build a LeRobotDataset over lerobot/libero with action chunks of length CHUNK_SIZE.
+
+    `split` controls which episodes are used: "train" / "val" deterministically
+    partition by episode index (90/10) so eval is held-out.
+    """
+    from lerobot.datasets import LeRobotDataset
+    from lerobot.datasets.dataset_metadata import LeRobotDatasetMetadata
+
+    ds_meta = LeRobotDatasetMetadata(DATASET_REPO_ID)
+    delta_timestamps = _resolve_delta_timestamps(ds_meta)
+
+    n_eps = ds_meta.total_episodes
+    val_step = max(1, n_eps // 10)
+    val_eps = list(range(0, n_eps, val_step))
+    if split == "val":
+        episodes = val_eps
+    elif split == "train":
+        val_set = set(val_eps)
+        episodes = [i for i in range(n_eps) if i not in val_set]
+    else:
+        raise ValueError(f"Unknown split {split!r}")
+
+    return LeRobotDataset(
+        DATASET_REPO_ID,
+        delta_timestamps=delta_timestamps,
+        episodes=episodes,
+        return_uint8=True,
     )
 
-    # Save tokenizer
-    with open(tokenizer_pkl, "wb") as f:
-        pickle.dump(enc, f)
 
-    t1 = time.time()
-    print(f"Tokenizer: trained in {t1 - t0:.1f}s, saved to {tokenizer_pkl}")
+def make_dataloader(dataset, batch_size, num_workers=4, shuffle=True):
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=shuffle,
+        pin_memory=torch.cuda.is_available(),
+        drop_last=True,
+        persistent_workers=num_workers > 0,
+    )
 
-    # --- Build token_bytes lookup for BPB evaluation ---
-    print("Tokenizer: building token_bytes lookup...")
-    special_set = set(SPECIAL_TOKENS)
-    token_bytes_list = []
-    for token_id in range(enc.n_vocab):
-        token_str = enc.decode([token_id])
-        if token_str in special_set:
-            token_bytes_list.append(0)
-        else:
-            token_bytes_list.append(len(token_str.encode("utf-8")))
-    token_bytes_tensor = torch.tensor(token_bytes_list, dtype=torch.int32)
-    torch.save(token_bytes_tensor, token_bytes_path)
-    print(f"Tokenizer: saved token_bytes to {token_bytes_path}")
-
-    # Sanity check
-    test = "Hello world! Numbers: 123. Unicode: 你好"
-    encoded = enc.encode_ordinary(test)
-    decoded = enc.decode(encoded)
-    assert decoded == test, f"Tokenizer roundtrip failed: {test!r} -> {decoded!r}"
-    print(f"Tokenizer: sanity check passed (vocab_size={enc.n_vocab})")
 
 # ---------------------------------------------------------------------------
-# Runtime utilities (imported by train.py)
+# Target policy (frozen pi0-fast)
 # ---------------------------------------------------------------------------
 
-class Tokenizer:
-    """Minimal tokenizer wrapper. Training is handled above."""
-
-    def __init__(self, enc):
-        self.enc = enc
-        self.bos_token_id = enc.encode_single_token(BOS_TOKEN)
-
-    @classmethod
-    def from_directory(cls, tokenizer_dir=TOKENIZER_DIR):
-        with open(os.path.join(tokenizer_dir, "tokenizer.pkl"), "rb") as f:
-            enc = pickle.load(f)
-        return cls(enc)
-
-    def get_vocab_size(self):
-        return self.enc.n_vocab
-
-    def get_bos_token_id(self):
-        return self.bos_token_id
-
-    def encode(self, text, prepend=None, num_threads=8):
-        if prepend is not None:
-            prepend_id = prepend if isinstance(prepend, int) else self.enc.encode_single_token(prepend)
-        if isinstance(text, str):
-            ids = self.enc.encode_ordinary(text)
-            if prepend is not None:
-                ids.insert(0, prepend_id)
-        elif isinstance(text, list):
-            ids = self.enc.encode_ordinary_batch(text, num_threads=num_threads)
-            if prepend is not None:
-                for row in ids:
-                    row.insert(0, prepend_id)
-        else:
-            raise ValueError(f"Invalid input type: {type(text)}")
-        return ids
-
-    def decode(self, ids):
-        return self.enc.decode(ids)
+def _make_policy_config():
+    from lerobot.policies.pi0_fast.configuration_pi0_fast import PI0FastConfig
+    return PI0FastConfig(
+        chunk_size=CHUNK_SIZE,
+        n_action_steps=N_ACTION_STEPS,
+        max_action_tokens=MAX_ACTION_TOKENS,
+        empty_cameras=EMPTY_CAMERAS,
+        dtype=DTYPE,
+        gradient_checkpointing=GRADIENT_CKPT,
+        action_tokenizer_name=ACTION_TOKENIZER,
+        text_tokenizer_name=TEXT_TOKENIZER,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        pretrained_path=PRETRAINED_POLICY,
+    )
 
 
-def get_token_bytes(device="cpu"):
-    path = os.path.join(TOKENIZER_DIR, "token_bytes.pt")
-    with open(path, "rb") as f:
-        return torch.load(f, map_location=device)
+def load_target_policy(dataset=None):
+    """Load lerobot/pi0fast_base as a frozen target.
 
-
-def _document_batches(split, tokenizer_batch_size=128):
-    """Infinite iterator over document batches from parquet files."""
-    parquet_paths = list_parquet_files()
-    assert len(parquet_paths) > 0, "No parquet files found. Run prepare.py first."
-    val_path = os.path.join(DATA_DIR, VAL_FILENAME)
-    if split == "train":
-        parquet_paths = [p for p in parquet_paths if p != val_path]
-        assert len(parquet_paths) > 0, "No training shards found."
-    else:
-        parquet_paths = [val_path]
-    epoch = 1
-    while True:
-        for filepath in parquet_paths:
-            pf = pq.ParquetFile(filepath)
-            for rg_idx in range(pf.num_row_groups):
-                rg = pf.read_row_group(rg_idx)
-                batch = rg.column('text').to_pylist()
-                for i in range(0, len(batch), tokenizer_batch_size):
-                    yield batch[i:i+tokenizer_batch_size], epoch
-        epoch += 1
-
-
-def make_dataloader(tokenizer, B, T, split, buffer_size=1000):
+    Returns (policy, preprocessor, postprocessor). The policy's parameters
+    have requires_grad=False and the policy is in eval mode.
     """
-    BOS-aligned dataloader with best-fit packing.
-    Every row starts with BOS. Documents packed using best-fit to minimize cropping.
-    When no document fits remaining space, crops shortest doc to fill exactly.
-    100% utilization (no padding).
-    """
-    assert split in ["train", "val"]
-    row_capacity = T + 1
-    batches = _document_batches(split)
-    bos_token = tokenizer.get_bos_token_id()
-    doc_buffer = []
-    epoch = 1
+    from lerobot.policies import make_policy, make_pre_post_processors
 
-    def refill_buffer():
-        nonlocal epoch
-        doc_batch, epoch = next(batches)
-        token_lists = tokenizer.encode(doc_batch, prepend=bos_token)
-        doc_buffer.extend(token_lists)
+    cfg = _make_policy_config()
+    if dataset is None:
+        dataset = make_dataset("train")
 
-    # Pre-allocate buffers: [inputs (B*T) | targets (B*T)]
-    row_buffer = torch.empty((B, row_capacity), dtype=torch.long)
-    cpu_buffer = torch.empty(2 * B * T, dtype=torch.long, pin_memory=True)
-    gpu_buffer = torch.empty(2 * B * T, dtype=torch.long, device="cuda")
-    cpu_inputs = cpu_buffer[:B * T].view(B, T)
-    cpu_targets = cpu_buffer[B * T:].view(B, T)
-    inputs = gpu_buffer[:B * T].view(B, T)
-    targets = gpu_buffer[B * T:].view(B, T)
+    policy = make_policy(cfg=cfg, ds_meta=dataset.meta)
 
-    while True:
-        for row_idx in range(B):
-            pos = 0
-            while pos < row_capacity:
-                while len(doc_buffer) < buffer_size:
-                    refill_buffer()
+    device = str(cfg.device)
+    preprocessor, postprocessor = make_pre_post_processors(
+        policy_cfg=cfg,
+        pretrained_path=PRETRAINED_POLICY,
+        preprocessor_overrides={
+            "device_processor": {"device": device},
+            "normalizer_processor": {
+                "stats": dataset.meta.stats,
+                "features": {**cfg.input_features, **cfg.output_features},
+                "norm_map": cfg.normalization_mapping,
+            },
+            "action_tokenizer_processor": {"action_tokenizer_name": ACTION_TOKENIZER},
+        },
+        postprocessor_overrides={
+            "unnormalizer_processor": {
+                "stats": dataset.meta.stats,
+                "features": cfg.output_features,
+                "norm_map": cfg.normalization_mapping,
+            },
+        },
+    )
 
-                remaining = row_capacity - pos
+    for p in policy.parameters():
+        p.requires_grad_(False)
+    policy.eval()
+    return policy, preprocessor, postprocessor
 
-                # Find largest doc that fits entirely
-                best_idx = -1
-                best_len = 0
-                for i, doc in enumerate(doc_buffer):
-                    doc_len = len(doc)
-                    if doc_len <= remaining and doc_len > best_len:
-                        best_idx = i
-                        best_len = doc_len
 
-                if best_idx >= 0:
-                    doc = doc_buffer.pop(best_idx)
-                    row_buffer[row_idx, pos:pos + len(doc)] = torch.tensor(doc, dtype=torch.long)
-                    pos += len(doc)
-                else:
-                    # No doc fits — crop shortest to fill remaining
-                    shortest_idx = min(range(len(doc_buffer)), key=lambda i: len(doc_buffer[i]))
-                    doc = doc_buffer.pop(shortest_idx)
-                    row_buffer[row_idx, pos:pos + remaining] = torch.tensor(doc[:remaining], dtype=torch.long)
-                    pos += remaining
+def target_components(policy):
+    """Convenience accessors that the drafter shares with the target."""
+    inner = policy.model  # PI0FastPytorch
+    pg = inner.paligemma_with_expert.paligemma
+    return {
+        "language_model": pg.model.language_model,   # Gemma-2B trunk
+        "embed_tokens":   pg.model.language_model.embed_tokens,
+        "lm_head":        pg.lm_head,
+        "paligemma_tokenizer": inner._paligemma_tokenizer,
+    }
 
-        cpu_inputs.copy_(row_buffer[:, :-1])
-        cpu_targets.copy_(row_buffer[:, 1:])
-        gpu_buffer.copy_(cpu_buffer, non_blocking=True)
-        yield inputs, targets, epoch
 
 # ---------------------------------------------------------------------------
-# Evaluation (DO NOT CHANGE — this is the fixed metric)
+# Target forward with all-layer hidden states
+#
+# We re-use pi0-fast's `embed_prefix_fast` to build the [images | language |
+# fast_tokens] embedding sequence, then call the Gemma trunk directly with
+# `output_hidden_states=True`. The trunk returns hidden states for each of
+# the 18 layers + the embedding layer — DFlash uses these as conditioning.
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
-def evaluate_bpb(model, tokenizer, batch_size):
+def target_forward_with_hidden_states(policy, batch):
+    """Run the frozen target on a preprocessed batch and return:
+
+    Returns:
+        hidden_states_list: tuple of (num_layers + 1) tensors, each
+            (B, seq_len, hidden_size). Index 0 is the embedding output;
+            index L is the output of the L-th transformer layer.
+        fast_logits: (B, T_fast, vocab_size) — target's own next-token logits
+            at action positions, useful as a teacher signal.
+        fast_token_ids: (B, T_fast) — ground-truth FAST action token labels.
+        fast_token_mask: (B, T_fast) — valid (non-padding) action positions.
+        fast_offset: int — index into seq_len where FAST tokens start.
     """
-    Bits per byte (BPB): vocab size-independent evaluation metric.
-    Sums per-token cross-entropy (in nats), sums target byte lengths,
-    then converts nats/byte to bits/byte. Special tokens (byte length 0)
-    are excluded from both sums.
-    Uses fixed MAX_SEQ_LEN so results are comparable across configs.
-    """
-    token_bytes = get_token_bytes(device="cuda")
-    val_loader = make_dataloader(tokenizer, batch_size, MAX_SEQ_LEN, "val")
-    steps = EVAL_TOKENS // (batch_size * MAX_SEQ_LEN)
-    total_nats = 0.0
-    total_bytes = 0
-    for _ in range(steps):
-        x, y, _ = next(val_loader)
-        loss_flat = model(x, y, reduction='none').view(-1)
-        y_flat = y.view(-1)
-        nbytes = token_bytes[y_flat]
-        mask = nbytes > 0
-        total_nats += (loss_flat * mask).sum().item()
-        total_bytes += nbytes.sum().item()
-    return total_nats / (math.log(2) * total_bytes)
+    from lerobot.utils.constants import (
+        ACTION_TOKENS, ACTION_TOKEN_MASK,
+        OBS_LANGUAGE_TOKENS, OBS_LANGUAGE_ATTENTION_MASK,
+    )
+
+    inner = policy.model  # PI0FastPytorch
+    images, img_masks = policy._preprocess_images(batch)
+    fast_tokens = batch[ACTION_TOKENS]
+    fast_masks  = batch[ACTION_TOKEN_MASK]
+    tokens      = batch[OBS_LANGUAGE_TOKENS]
+    masks       = batch[OBS_LANGUAGE_ATTENTION_MASK]
+
+    prefix_embs, pad_masks, att_masks, _, num_fast_embs = inner.embed_prefix_fast(
+        images, img_masks, tokens, masks,
+        fast_action_tokens=fast_tokens,
+        fast_action_masks=fast_masks,
+    )
+    lm = inner.paligemma_with_expert.paligemma.model.language_model
+    if lm.layers[0].self_attn.q_proj.weight.dtype == torch.bfloat16:
+        prefix_embs = prefix_embs.to(dtype=torch.bfloat16)
+
+    position_ids = torch.cumsum(pad_masks, dim=1) - 1
+    att_2d_4d = inner._prepare_attention_masks_4d(att_masks, dtype=prefix_embs.dtype)
+
+    out = lm.forward(
+        inputs_embeds=prefix_embs,
+        attention_mask=att_2d_4d,
+        position_ids=position_ids,
+        past_key_values=None,
+        use_cache=False,
+        output_hidden_states=True,
+    )
+    hidden_states_list = out.hidden_states
+    fast_offset = prefix_embs.shape[1] - num_fast_embs
+
+    lm_head = inner.paligemma_with_expert.paligemma.lm_head
+    fast_hidden = out.last_hidden_state[:, fast_offset:, :]
+    fast_logits = lm_head(fast_hidden)
+
+    return {
+        "hidden_states":   hidden_states_list,
+        "fast_logits":     fast_logits,
+        "fast_token_ids":  fast_tokens,
+        "fast_token_mask": fast_masks,
+        "fast_offset":     fast_offset,
+    }
+
+
+def fast_hidden_at_action_positions(hidden_states_list, fast_offset):
+    """Slice hidden_states_list to keep only the action-token positions."""
+    return tuple(h[:, fast_offset:, :] for h in hidden_states_list)
+
+
+# ---------------------------------------------------------------------------
+# Evaluation — teacher-forced acceptance length (FIXED METRIC)
+#
+# For each (batch, starting position t) over a held-out val split:
+#   - Take a length-`block_size` block of true action tokens y[t..t+B-1].
+#   - Drafter input: noise_embedding for [y[t], <mask>, <mask>, ..., <mask>]
+#     (position t given by target as in real spec decoding; positions
+#     t+1..t+B-1 masked).
+#   - Drafter output (argmax) at positions t+1..t+B-1 are compared to true
+#     tokens; accepted length = number of consecutive matches starting at
+#     t+1, plus the bonus token from the target. This matches the verifier
+#     in dflash.model.dflash_generate.
+# Mean over (t, batch) is the metric. Higher is better.
+# ---------------------------------------------------------------------------
+
+@torch.no_grad()
+def evaluate_acceptance_length(drafter, policy, preprocessor):
+    """Mean teacher-forced acceptance length (in tokens). Fixed metric."""
+    from torch.utils.data import DataLoader
+
+    drafter.eval()
+    target_comp = target_components(policy)
+    embed_tokens = target_comp["embed_tokens"]
+    lm_head      = target_comp["lm_head"]
+
+    val_loader = make_dataloader(
+        make_dataset("val"),
+        batch_size=EVAL_BATCH_SIZE,
+        num_workers=2,
+        shuffle=False,
+    )
+    val_iter = iter(val_loader)
+
+    block_size = drafter.block_size
+    mask_token_id = drafter.mask_token_id
+    target_layer_ids = drafter.target_layer_ids
+
+    total_accepted = 0.0
+    total_blocks   = 0
+
+    torch.manual_seed(EVAL_SEED)
+    for _ in range(EVAL_BATCHES):
+        try:
+            batch = next(val_iter)
+        except StopIteration:
+            break
+        batch = preprocessor(batch)
+
+        target_out = target_forward_with_hidden_states(policy, batch)
+        fast_hiddens = fast_hidden_at_action_positions(
+            target_out["hidden_states"], target_out["fast_offset"]
+        )
+        true_tokens = target_out["fast_token_ids"]
+        true_mask   = target_out["fast_token_mask"]
+        B, T = true_tokens.shape
+        if T < block_size + 1:
+            continue
+
+        # Sample one block per batch element at a random valid start position.
+        max_start = T - block_size
+        starts = torch.randint(0, max_start, (B,), device=true_tokens.device)
+
+        # Build masked block input: position 0 is true token; rest are <mask>.
+        block_ids = torch.full((B, block_size), mask_token_id,
+                               dtype=torch.long, device=true_tokens.device)
+        for b in range(B):
+            block_ids[b, 0] = true_tokens[b, starts[b]]
+
+        # Concat target hidden across selected layers and slice the block window.
+        from dflash.model import extract_context_feature  # noqa: WPS433
+        ctx = extract_context_feature(fast_hiddens, target_layer_ids)
+        ctx_blocks = torch.stack(
+            [ctx[b, starts[b]:starts[b] + block_size] for b in range(B)], dim=0
+        )
+
+        noise_emb = embed_tokens(block_ids)
+        block_positions = torch.arange(block_size, device=block_ids.device)
+        position_ids = block_positions.repeat(2)[None].expand(B, -1)
+        h = drafter(
+            target_hidden=ctx_blocks,
+            noise_embedding=noise_emb,
+            position_ids=position_ids,
+            past_key_values=None,
+            use_cache=False,
+            is_causal=False,
+        )
+        logits = lm_head(h)
+        pred = logits.argmax(dim=-1)  # (B, block_size)
+
+        # Verify against true tokens t+1..t+B-1; accepted length follows the
+        # cumprod-of-matches scheme used in dflash_generate.
+        true_block = torch.stack(
+            [true_tokens[b, starts[b]:starts[b] + block_size] for b in range(B)], dim=0
+        )
+        valid_block = torch.stack(
+            [true_mask[b, starts[b]:starts[b] + block_size] for b in range(B)], dim=0
+        )
+        match = (pred[:, :-1] == true_block[:, 1:]).int()
+        accepted = (match.cumprod(dim=1).sum(dim=1) + 1).float()  # +1 for the target's bonus
+        total_accepted += (accepted * valid_block[:, 0].float()).sum().item()
+        total_blocks   += valid_block[:, 0].float().sum().item()
+
+    return total_accepted / max(1, total_blocks)
+
+
+# ---------------------------------------------------------------------------
+# Optional end-to-end LIBERO eval (NOT the fixed metric)
+# ---------------------------------------------------------------------------
+
+@torch.no_grad()
+def evaluate_libero_success_rate(policy, preprocessor, postprocessor, *, use_amp=True):
+    """End-to-end success rate on a small LIBERO suite. Slow; opt-in."""
+    from lerobot.envs import make_env
+    from lerobot.envs.factory import make_env_config, make_env_pre_post_processors
+    from lerobot.scripts.lerobot_eval import close_envs, eval_policy_all
+
+    env_cfg = make_env_config(
+        "libero",
+        task=",".join(LIBERO_EVAL_SUITES),
+        control_mode=CONTROL_MODE,
+    )
+    envs = make_env(env_cfg, n_envs=LIBERO_EVAL_BATCH_SIZE, use_async_envs=False)
+    env_pre, env_post = make_env_pre_post_processors(env_cfg=env_cfg, policy_cfg=policy.config)
+
+    device = next(policy.parameters()).device
+    amp_ctx = torch.autocast(device_type=device.type) if use_amp else nullcontext()
+
+    policy.eval()
+    try:
+        with amp_ctx:
+            info = eval_policy_all(
+                envs=envs,
+                policy=policy,
+                env_preprocessor=env_pre,
+                env_postprocessor=env_post,
+                preprocessor=preprocessor,
+                postprocessor=postprocessor,
+                n_episodes=LIBERO_EVAL_EPISODES_PER_TASK,
+                max_episodes_rendered=0,
+                videos_dir=None,
+                start_seed=EVAL_SEED,
+                max_parallel_tasks=LIBERO_EVAL_MAX_PARALLEL_TASKS,
+            )
+    finally:
+        close_envs(envs)
+
+    return float(info["overall"]["pc_success"]) / 100.0
+
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Prepare data and tokenizer for autoresearch")
-    parser.add_argument("--num-shards", type=int, default=10, help="Number of training shards to download (-1 = all). Val shard is always pinned.")
-    parser.add_argument("--download-workers", type=int, default=8, help="Number of parallel download workers")
+    parser = argparse.ArgumentParser(description="Prepare data and target for DFlash drafter training")
+    parser.add_argument("--skip-data",  action="store_true")
+    parser.add_argument("--skip-model", action="store_true")
     args = parser.parse_args()
 
-    num_shards = MAX_SHARD if args.num_shards == -1 else args.num_shards
-
+    _ensure_dirs()
     print(f"Cache directory: {CACHE_DIR}")
+    print(f"HF_HOME:         {os.environ['HF_HOME']}")
     print()
 
-    # Step 1: Download data
-    download_data(num_shards, download_workers=args.download_workers)
-    print()
+    if not args.skip_data:
+        download_dataset()
+        print()
+    if not args.skip_model:
+        download_model()
+        print()
 
-    # Step 2: Train tokenizer
-    train_tokenizer()
-    print()
     print("Done! Ready to train.")
