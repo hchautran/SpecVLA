@@ -179,8 +179,11 @@ def train_step(drafter, target_policy, target_comp, batch, preprocessor, drafter
     )
     logits = lm_head(h)  # (B, block_size, vocab)
 
-    # Loss only on masked positions (1..B-1) and valid action positions.
-    pred_logits  = logits[:, 1:].reshape(-1, logits.size(-1))
+    # Loss alignment matches the fixed eval in prepare.evaluate_acceptance_length:
+    # logits at position k predict the token at block position k+1 (next-token
+    # within the block). Train/eval used to disagree (at-position vs next-token),
+    # which floored accept_len at 1.0.
+    pred_logits  = logits[:, :-1].reshape(-1, logits.size(-1))
     pred_targets = block_targets[:, 1:].reshape(-1)
     pred_valid   = block_valid[:, 1:].reshape(-1).float()
 
