@@ -110,7 +110,11 @@ def make_drafter(target_policy, drafter_cfg: DrafterConfig) -> DFlashDraftModel:
     )
     cfg.num_target_layers = TARGET_NUM_LAYERS
     cfg.block_size = drafter_cfg.block_size
-    cfg.dflash_config = {"mask_token_id": mask_token_id}
+    # All 18 target layers in the cross-attention context.
+    cfg.dflash_config = {
+        "mask_token_id": mask_token_id,
+        "target_layer_ids": list(range(TARGET_NUM_LAYERS)),
+    }
 
     return DFlashDraftModel(cfg)
 
