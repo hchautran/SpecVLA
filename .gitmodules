@@ -1,0 +1,6 @@
+[submodule "dflash"]
+	path = dflash
+	url = https://github.com/z-lab/dflash.git
+[submodule "lerobot"]
+	path = lerobot
+	url = https://github.com/huggingface/lerobot.git
