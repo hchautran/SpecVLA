@@ -69,11 +69,12 @@ class DrafterConfig:
 class TrainConfig:
     batch_size:        int    = 4
     num_workers:       int    = 4
+    inner_steps:       int    = 4    # drafter gradient updates per heavy target forward
     lr:                float  = 3e-4
     weight_decay:      float  = 0.01
     grad_clip:         float  = 1.0
     warmup_steps:      int    = 100
-    log_every:         int    = 25
+    log_every:         int    = 100
 
 
 # ---------------------------------------------------------------------------
@@ -141,15 +142,20 @@ def sample_masked_block(true_tokens, true_mask, block_size, mask_token_id):
     return block_ids, block_targets, block_valid, starts
 
 
-def train_step(drafter, target_policy, target_comp, batch, preprocessor, drafter_cfg):
-    embed_tokens = target_comp["embed_tokens"]
-    lm_head      = target_comp["lm_head"]
-
+def cached_target_forward(target_policy, batch, preprocessor):
+    """Heavy frozen-target forward; cache for multiple drafter inner steps."""
     batch = preprocessor(batch)
     target_out = target_forward_with_hidden_states(target_policy, batch)
     fast_hiddens = fast_hidden_at_action_positions(
         target_out["hidden_states"], target_out["fast_offset"]
     )
+    return target_out, fast_hiddens
+
+
+def drafter_loss(drafter, target_comp, target_out, fast_hiddens, drafter_cfg):
+    """Loss on one freshly-sampled masked block, using cached target outputs."""
+    embed_tokens = target_comp["embed_tokens"]
+    lm_head      = target_comp["lm_head"]
     true_tokens = target_out["fast_token_ids"]
     true_mask   = target_out["fast_token_mask"]
     if true_tokens.shape[1] < drafter_cfg.block_size + 1:
@@ -198,6 +204,12 @@ def train_step(drafter, target_policy, target_comp, batch, preprocessor, drafter
     weight = pred_valid * pos_weights
     loss = (loss_per_tok * weight).sum() / weight.sum().clamp(min=1)
     return loss
+
+
+def train_step(drafter, target_policy, target_comp, batch, preprocessor, drafter_cfg):
+    """One target forward + one drafter loss; used by evaluate_loss."""
+    target_out, fast_hiddens = cached_target_forward(target_policy, batch, preprocessor)
+    return drafter_loss(drafter, target_comp, target_out, fast_hiddens, drafter_cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +434,8 @@ def main():
     losses = []
     data_iter = iter(train_loader)
 
+    inner_steps = 1 if args.smoke else train_cfg.inner_steps
+
     while True:
         if args.smoke and step >= 2:
             break
@@ -436,36 +450,38 @@ def main():
         if args.smoke and step == 0:
             _smoke_sanity_check(target_policy, preprocessor, batch)
 
-        for g in optimizer.param_groups:
-            g["lr"] = train_cfg.lr * lr_at(step, train_t0)
+        # One heavy frozen-target forward; reuse for `inner_steps` drafter updates.
+        target_out, fast_hiddens = cached_target_forward(target_policy, batch, preprocessor)
 
-        loss = train_step(drafter, target_policy, target_comp, batch, preprocessor, drafter_cfg)
-        if loss is None:
-            continue
+        for _ in range(inner_steps):
+            for g in optimizer.param_groups:
+                g["lr"] = train_cfg.lr * lr_at(step, train_t0)
 
-        if args.smoke:
-            assert torch.isfinite(loss), f"smoke: non-finite loss {loss}"
+            loss = drafter_loss(drafter, target_comp, target_out, fast_hiddens, drafter_cfg)
+            if loss is None:
+                break
 
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(drafter.parameters(), train_cfg.grad_clip)
-        optimizer.step()
+            if args.smoke:
+                assert torch.isfinite(loss), f"smoke: non-finite loss {loss}"
 
-        # Start the wall-clock budget *after* the first step so warmup compile/
-        # cudagraph time doesn't eat into the budget.
-        if train_t0 is None:
-            train_t0 = time.time()
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(drafter.parameters(), train_cfg.grad_clip)
+            optimizer.step()
 
-        losses.append(loss.item())
-        step += 1
-        wandb.log(
-            {"train/loss": loss.item(), "train/lr": optimizer.param_groups[0]["lr"]},
-            step=step,
-        )
-        if step % train_cfg.log_every == 0:
-            recent = sum(losses[-train_cfg.log_every:]) / min(len(losses), train_cfg.log_every)
-            elapsed = time.time() - train_t0
-            print(f"step {step:5d} | loss {recent:.4f} | lr {optimizer.param_groups[0]['lr']:.2e} | t {elapsed:.0f}s")
+            if train_t0 is None:
+                train_t0 = time.time()
+
+            losses.append(loss.item())
+            step += 1
+            wandb.log(
+                {"train/loss": loss.item(), "train/lr": optimizer.param_groups[0]["lr"]},
+                step=step,
+            )
+            if step % train_cfg.log_every == 0:
+                recent = sum(losses[-train_cfg.log_every:]) / min(len(losses), train_cfg.log_every)
+                elapsed = time.time() - train_t0
+                print(f"step {step:5d} | loss {recent:.4f} | lr {optimizer.param_groups[0]['lr']:.2e} | t {elapsed:.0f}s")
 
     train_seconds = time.time() - train_t0
     print("Evaluating held-out loss...")
