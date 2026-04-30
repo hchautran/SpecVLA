@@ -328,10 +328,14 @@ def main():
         weight_decay=train_cfg.weight_decay,
     )
 
-    def lr_at(step):
+    def lr_at(step, train_t0):
         if step < train_cfg.warmup_steps:
             return step / max(1, train_cfg.warmup_steps)
-        return 1.0
+        if train_t0 is None:
+            return 1.0
+        progress = min(1.0, (time.time() - train_t0) / TIME_BUDGET)
+        # Cosine decay from 1.0 -> 0.1 over the wall-clock training budget.
+        return 0.1 + 0.45 * (1.0 + math.cos(math.pi * progress))
 
     if args.smoke:
         print("Smoke: running 2 train steps + 1 eval batch...")
@@ -358,7 +362,7 @@ def main():
             _smoke_sanity_check(target_policy, preprocessor, batch)
 
         for g in optimizer.param_groups:
-            g["lr"] = train_cfg.lr * lr_at(step)
+            g["lr"] = train_cfg.lr * lr_at(step, train_t0)
 
         loss = train_step(drafter, target_policy, target_comp, batch, preprocessor, drafter_cfg)
         if loss is None:
