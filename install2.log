@@ -1,0 +1,6 @@
+  × No solution found when resolving dependencies:
+  ╰─▶ Because only lerobot[pi]==0.5.2 is available and the current Python
+      version (3.10.20) does not satisfy Python>=3.12, we can conclude that
+      all versions of lerobot[pi] cannot be used.
+      And because you require lerobot[pi], we can conclude that your
+      requirements are unsatisfiable.

@@ -1,0 +1,105 @@
+Downloading cpython-3.10.20-linux-x86_64-gnu (download) (28.5MiB)
+ Downloaded cpython-3.10.20-linux-x86_64-gnu (download)
+Using CPython 3.10.20
+Creating virtual environment at: .venv
+Downloading triton (162.4MiB)
+Downloading numpy (16.0MiB)
+Downloading networkx (1.6MiB)
+Downloading nvidia-cusparse-cu12 (274.9MiB)
+Downloading hf-xet (4.0MiB)
+Downloading tiktoken (1.1MiB)
+Downloading nvidia-cuda-cupti-cu12 (9.8MiB)
+Downloading nvidia-cusolver-cu12 (255.1MiB)
+Downloading pygments (1.2MiB)
+Downloading rustbpe (1.0MiB)
+Downloading nvidia-cufile-cu12 (1.1MiB)
+Downloading nvidia-cuda-nvrtc-cu12 (84.0MiB)
+Downloading nvidia-cublas-cu12 (566.8MiB)
+Downloading nvidia-nccl-cu12 (307.4MiB)
+Downloading kiwisolver (1.6MiB)
+Downloading nvidia-cudnn-cu12 (674.0MiB)
+Downloading nvidia-nvjitlink-cu12 (37.4MiB)
+Downloading pandas (12.2MiB)
+Downloading pyarrow (45.4MiB)
+Downloading matplotlib (8.3MiB)
+Downloading nvidia-cusparselt-cu12 (273.9MiB)
+Downloading nvidia-cufft-cu12 (184.2MiB)
+Downloading nvidia-nvshmem-cu12 (118.9MiB)
+Downloading nvidia-curand-cu12 (60.7MiB)
+Downloading fonttools (4.6MiB)
+Downloading pillow (6.7MiB)
+Downloading torch (859.2MiB)
+ Downloaded rustbpe
+ Downloaded nvidia-cufile-cu12
+ Downloaded tiktoken
+ Downloaded kiwisolver
+ Downloaded hf-xet
+ Downloaded pygments
+ Downloaded pillow
+ Downloaded fonttools
+ Downloaded networkx
+ Downloaded nvidia-cuda-cupti-cu12
+ Downloaded matplotlib
+ Downloaded numpy
+ Downloaded nvidia-nvjitlink-cu12
+ Downloaded nvidia-curand-cu12
+ Downloaded nvidia-cuda-nvrtc-cu12
+ Downloaded pyarrow
+ Downloaded pandas
+ Downloaded nvidia-nvshmem-cu12
+ Downloaded nvidia-cufft-cu12
+ Downloaded triton
+ Downloaded nvidia-cusolver-cu12
+ Downloaded nvidia-cusparse-cu12
+ Downloaded nvidia-cusparselt-cu12
+ Downloaded nvidia-nccl-cu12
+ Downloaded nvidia-cublas-cu12
+ Downloaded nvidia-cudnn-cu12
+ Downloaded torch
+warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+         If the cache and target directories are on different filesystems, hardlinking may not be supported.
+         If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.
+Installed 67 packages in 2.64s
+Cache directory: /home/exouser/.cache/autoresearch
+HF_HOME:         /media/volume/Chau/.cache
+
+Data: downloading lerobot/libero...
+Data: ready in 13.0s at /home/exouser/.cache/autoresearch/huggingface/hub/datasets--lerobot--libero/snapshots/1595a93b43aa055e55c127a4f0b4a99bb8035447
+
+Model: downloading lerobot/pi0fast_base...
+Traceback (most recent call last):
+  File "/media/volume/Chau/autoresearch/.venv/lib/python3.10/site-packages/huggingface_hub/utils/_http.py", line 720, in hf_raise_for_status
+    response.raise_for_status()
+  File "/media/volume/Chau/autoresearch/.venv/lib/python3.10/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '404 Not Found' for url 'https://huggingface.co/api/models/lerobot/pi0fast_base/revision/main'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/media/volume/Chau/autoresearch/prepare.py", line 492, in <module>
+    download_model()
+  File "/media/volume/Chau/autoresearch/prepare.py", line 117, in download_model
+    path = snapshot_download(
+  File "/media/volume/Chau/autoresearch/.venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 89, in _inner_fn
+    return fn(*args, **kwargs)
+  File "/media/volume/Chau/autoresearch/.venv/lib/python3.10/site-packages/huggingface_hub/_snapshot_download.py", line 321, in snapshot_download
+    raise api_call_error
+  File "/media/volume/Chau/autoresearch/.venv/lib/python3.10/site-packages/huggingface_hub/_snapshot_download.py", line 240, in snapshot_download
+    repo_info = api.repo_info(repo_id=repo_id, repo_type=repo_type, revision=revision)
+  File "/media/volume/Chau/autoresearch/.venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 89, in _inner_fn
+    return fn(*args, **kwargs)
+  File "/media/volume/Chau/autoresearch/.venv/lib/python3.10/site-packages/huggingface_hub/hf_api.py", line 3048, in repo_info
+    return method(
+  File "/media/volume/Chau/autoresearch/.venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 89, in _inner_fn
+    return fn(*args, **kwargs)
+  File "/media/volume/Chau/autoresearch/.venv/lib/python3.10/site-packages/huggingface_hub/hf_api.py", line 2842, in model_info
+    hf_raise_for_status(r)
+  File "/media/volume/Chau/autoresearch/.venv/lib/python3.10/site-packages/huggingface_hub/utils/_http.py", line 788, in hf_raise_for_status
+    raise _format(RepositoryNotFoundError, message, response) from e
+huggingface_hub.errors.RepositoryNotFoundError: 404 Client Error. (Request ID: Root=1-69f2d8d2-40ff2b090e1f280a440e226e;a81f4ad3-9b49-4e3a-bc81-20f57bb07657)
+
+Repository Not Found for url: https://huggingface.co/api/models/lerobot/pi0fast_base/revision/main.
+Please make sure you specified the correct `repo_id` and `repo_type`.
+If you are trying to access a private or gated repo, make sure you are authenticated. For more details, see https://huggingface.co/docs/huggingface_hub/authentication

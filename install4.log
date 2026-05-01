@@ -1,0 +1,6 @@
+Resolved 1 package in 123ms
+Downloading sentencepiece (1.3MiB)
+ Downloaded sentencepiece
+Prepared 1 package in 61ms
+Installed 1 package in 13ms
+ + sentencepiece==0.2.1

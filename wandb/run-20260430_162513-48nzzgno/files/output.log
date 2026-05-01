@@ -1,0 +1,76 @@
+Loading frozen target (pi0-fast)...
+WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder
+The PI0Fast model is a direct port of the OpenPI implementation.
+This implementation follows the original OpenPI structure for compatibility.
+Original implementation: https://github.com/Physical-Intelligence/openpi
+Loading model from: lerobot/pi0fast-base
+✓ Loaded state dict from model.safetensors
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.bias
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.weight
+All keys loaded successfully!
+Building drafter...
+Drafter params: 195.1M
+Building dataloader...
+Training (budget = 300s)...
+step    25 | loss 36.4999 | lr 7.20e-05 | t 5s
+step    50 | loss 10.6628 | lr 1.47e-04 | t 10s
+step    75 | loss 9.5669 | lr 2.22e-04 | t 15s
+step   100 | loss 6.7219 | lr 2.97e-04 | t 20s
+step   125 | loss 6.8416 | lr 3.00e-04 | t 26s
+step   150 | loss 4.9763 | lr 3.00e-04 | t 31s
+step   175 | loss 5.7832 | lr 3.00e-04 | t 36s
+step   200 | loss 4.6784 | lr 3.00e-04 | t 41s
+step   225 | loss 4.6733 | lr 3.00e-04 | t 46s
+step   250 | loss 4.8878 | lr 3.00e-04 | t 51s
+step   275 | loss 4.3564 | lr 3.00e-04 | t 57s
+step   300 | loss 3.9707 | lr 3.00e-04 | t 62s
+step   325 | loss 4.3858 | lr 3.00e-04 | t 67s
+step   350 | loss 4.0954 | lr 3.00e-04 | t 72s
+step   375 | loss 5.0879 | lr 3.00e-04 | t 77s
+step   400 | loss 3.8739 | lr 3.00e-04 | t 82s
+step   425 | loss 3.5818 | lr 3.00e-04 | t 88s
+step   450 | loss 4.9101 | lr 3.00e-04 | t 93s
+step   475 | loss 4.3113 | lr 3.00e-04 | t 98s
+step   500 | loss 4.0680 | lr 3.00e-04 | t 103s
+step   525 | loss 3.8442 | lr 3.00e-04 | t 108s
+step   550 | loss 3.9258 | lr 3.00e-04 | t 114s
+step   575 | loss 3.2960 | lr 3.00e-04 | t 119s
+step   600 | loss 4.4083 | lr 3.00e-04 | t 124s
+step   625 | loss 3.9154 | lr 3.00e-04 | t 130s
+step   650 | loss 3.4472 | lr 3.00e-04 | t 135s
+step   675 | loss 3.6443 | lr 3.00e-04 | t 140s
+step   700 | loss 3.4125 | lr 3.00e-04 | t 145s
+step   725 | loss 3.7728 | lr 3.00e-04 | t 150s
+step   750 | loss 3.1760 | lr 3.00e-04 | t 155s
+step   775 | loss 2.7923 | lr 3.00e-04 | t 161s
+step   800 | loss 3.2131 | lr 3.00e-04 | t 166s
+step   825 | loss 3.3302 | lr 3.00e-04 | t 171s
+step   850 | loss 2.6610 | lr 3.00e-04 | t 176s
+step   875 | loss 3.3455 | lr 3.00e-04 | t 182s
+step   900 | loss 2.8518 | lr 3.00e-04 | t 187s
+step   925 | loss 3.2350 | lr 3.00e-04 | t 192s
+step   950 | loss 2.8609 | lr 3.00e-04 | t 197s
+step   975 | loss 2.4332 | lr 3.00e-04 | t 202s
+step  1000 | loss 3.1345 | lr 3.00e-04 | t 208s
+step  1025 | loss 3.6781 | lr 3.00e-04 | t 213s
+step  1050 | loss 2.5627 | lr 3.00e-04 | t 218s
+step  1075 | loss 3.2651 | lr 3.00e-04 | t 223s
+step  1100 | loss 3.0016 | lr 3.00e-04 | t 229s
+step  1125 | loss 2.5903 | lr 3.00e-04 | t 234s
+step  1150 | loss 2.1621 | lr 3.00e-04 | t 239s
+step  1175 | loss 3.0456 | lr 3.00e-04 | t 244s
+step  1200 | loss 3.2691 | lr 3.00e-04 | t 250s
+step  1225 | loss 2.9986 | lr 3.00e-04 | t 255s
+step  1250 | loss 2.5211 | lr 3.00e-04 | t 260s
+step  1275 | loss 2.5234 | lr 3.00e-04 | t 265s
+step  1300 | loss 3.1752 | lr 3.00e-04 | t 270s
+step  1325 | loss 2.4840 | lr 3.00e-04 | t 275s
+step  1350 | loss 1.8877 | lr 3.00e-04 | t 281s
+step  1375 | loss 2.6514 | lr 3.00e-04 | t 286s
+step  1400 | loss 2.3856 | lr 3.00e-04 | t 291s
+step  1425 | loss 2.4322 | lr 3.00e-04 | t 296s
+Evaluating held-out loss...
+WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder
+  eval_loss: 0.6169
+Evaluating acceptance length...
+WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder

@@ -1,0 +1,138 @@
+Loading frozen target (pi0-fast)...
+WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder
+The PI0Fast model is a direct port of the OpenPI implementation.
+This implementation follows the original OpenPI structure for compatibility.
+Original implementation: https://github.com/Physical-Intelligence/openpi
+Loading model from: lerobot/pi0fast-base
+✓ Loaded state dict from model.safetensors
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.bias
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.weight
+All keys loaded successfully!
+Building drafter...
+Drafter params: 195.1M
+Building dataloader...
+Training (budget = 600s)...
+step    25 | loss 27.1149 | lr 7.20e-05 | t 5s
+step    50 | loss 10.5228 | lr 1.47e-04 | t 10s
+step    75 | loss 5.2304 | lr 2.22e-04 | t 15s
+step   100 | loss 8.4378 | lr 2.97e-04 | t 20s
+step   125 | loss 4.4962 | lr 2.99e-04 | t 26s
+step   150 | loss 10.4900 | lr 2.98e-04 | t 31s
+step   175 | loss 6.1579 | lr 2.98e-04 | t 36s
+step   200 | loss 4.0125 | lr 2.97e-04 | t 41s
+step   225 | loss 2.9191 | lr 2.96e-04 | t 46s
+step   250 | loss 2.7521 | lr 2.95e-04 | t 51s
+step   275 | loss 2.4654 | lr 2.94e-04 | t 56s
+step   300 | loss 5.7251 | lr 2.93e-04 | t 62s
+step   325 | loss 3.4671 | lr 2.92e-04 | t 67s
+step   350 | loss 2.4407 | lr 2.91e-04 | t 72s
+step   375 | loss 2.3847 | lr 2.89e-04 | t 77s
+step   400 | loss 2.8892 | lr 2.88e-04 | t 82s
+step   425 | loss 2.4732 | lr 2.86e-04 | t 87s
+step   450 | loss 3.3675 | lr 2.85e-04 | t 92s
+step   475 | loss 1.8060 | lr 2.83e-04 | t 97s
+step   500 | loss 5.0020 | lr 2.81e-04 | t 103s
+step   525 | loss 4.3239 | lr 2.79e-04 | t 108s
+step   550 | loss 1.8051 | lr 2.77e-04 | t 113s
+step   575 | loss 3.7999 | lr 2.75e-04 | t 118s
+step   600 | loss 1.0831 | lr 2.73e-04 | t 123s
+step   625 | loss 2.8403 | lr 2.71e-04 | t 128s
+step   650 | loss 1.3530 | lr 2.68e-04 | t 133s
+step   675 | loss 2.8575 | lr 2.66e-04 | t 138s
+step   700 | loss 1.8796 | lr 2.64e-04 | t 144s
+step   725 | loss 1.4850 | lr 2.61e-04 | t 149s
+step   750 | loss 1.6724 | lr 2.59e-04 | t 154s
+step   775 | loss 1.5474 | lr 2.56e-04 | t 159s
+step   800 | loss 1.2232 | lr 2.53e-04 | t 164s
+step   825 | loss 1.9178 | lr 2.51e-04 | t 169s
+step   850 | loss 0.8037 | lr 2.48e-04 | t 174s
+step   875 | loss 1.7958 | lr 2.45e-04 | t 179s
+step   900 | loss 3.4317 | lr 2.42e-04 | t 184s
+step   925 | loss 3.1019 | lr 2.39e-04 | t 189s
+step   950 | loss 2.1954 | lr 2.36e-04 | t 195s
+step   975 | loss 2.6974 | lr 2.33e-04 | t 200s
+step  1000 | loss 2.1895 | lr 2.30e-04 | t 205s
+step  1025 | loss 1.8539 | lr 2.26e-04 | t 210s
+step  1050 | loss 1.5418 | lr 2.23e-04 | t 215s
+step  1075 | loss 2.2663 | lr 2.20e-04 | t 220s
+step  1100 | loss 2.3408 | lr 2.17e-04 | t 225s
+step  1125 | loss 1.8574 | lr 2.13e-04 | t 231s
+step  1150 | loss 2.3221 | lr 2.10e-04 | t 236s
+step  1175 | loss 1.7993 | lr 2.06e-04 | t 241s
+step  1200 | loss 1.1919 | lr 2.03e-04 | t 246s
+step  1225 | loss 1.7203 | lr 1.99e-04 | t 251s
+step  1250 | loss 2.0939 | lr 1.96e-04 | t 256s
+step  1275 | loss 1.6986 | lr 1.92e-04 | t 261s
+step  1300 | loss 1.5446 | lr 1.89e-04 | t 266s
+step  1325 | loss 1.6398 | lr 1.85e-04 | t 272s
+step  1350 | loss 2.7598 | lr 1.82e-04 | t 277s
+step  1375 | loss 1.4198 | lr 1.78e-04 | t 282s
+step  1400 | loss 1.4713 | lr 1.74e-04 | t 287s
+step  1425 | loss 1.1487 | lr 1.71e-04 | t 292s
+step  1450 | loss 1.2833 | lr 1.67e-04 | t 297s
+step  1475 | loss 2.2593 | lr 1.63e-04 | t 302s
+step  1500 | loss 1.3878 | lr 1.60e-04 | t 308s
+step  1525 | loss 1.3268 | lr 1.56e-04 | t 313s
+step  1550 | loss 0.9366 | lr 1.53e-04 | t 318s
+step  1575 | loss 1.4624 | lr 1.49e-04 | t 323s
+step  1600 | loss 1.9680 | lr 1.45e-04 | t 328s
+step  1625 | loss 0.7879 | lr 1.42e-04 | t 333s
+step  1650 | loss 1.7903 | lr 1.38e-04 | t 338s
+step  1675 | loss 1.5256 | lr 1.35e-04 | t 343s
+step  1700 | loss 1.8099 | lr 1.31e-04 | t 349s
+step  1725 | loss 1.6027 | lr 1.28e-04 | t 354s
+step  1750 | loss 2.4342 | lr 1.24e-04 | t 359s
+step  1775 | loss 1.8682 | lr 1.21e-04 | t 364s
+step  1800 | loss 1.0833 | lr 1.17e-04 | t 369s
+step  1825 | loss 2.7546 | lr 1.14e-04 | t 374s
+step  1850 | loss 1.3779 | lr 1.11e-04 | t 379s
+step  1875 | loss 1.7911 | lr 1.07e-04 | t 384s
+step  1900 | loss 2.4082 | lr 1.04e-04 | t 389s
+step  1925 | loss 1.6762 | lr 1.01e-04 | t 395s
+step  1950 | loss 0.7791 | lr 9.78e-05 | t 400s
+step  1975 | loss 2.4614 | lr 9.47e-05 | t 405s
+step  2000 | loss 2.0323 | lr 9.16e-05 | t 410s
+step  2025 | loss 2.0687 | lr 8.86e-05 | t 415s
+step  2050 | loss 1.5491 | lr 8.57e-05 | t 420s
+step  2075 | loss 1.9406 | lr 8.28e-05 | t 425s
+step  2100 | loss 1.1063 | lr 7.99e-05 | t 430s
+step  2125 | loss 2.6882 | lr 7.72e-05 | t 435s
+step  2150 | loss 1.7439 | lr 7.45e-05 | t 441s
+step  2175 | loss 1.1073 | lr 7.18e-05 | t 446s
+step  2200 | loss 0.3002 | lr 6.92e-05 | t 451s
+step  2225 | loss 1.8977 | lr 6.67e-05 | t 456s
+step  2250 | loss 2.0658 | lr 6.43e-05 | t 461s
+step  2275 | loss 0.9833 | lr 6.19e-05 | t 466s
+step  2300 | loss 2.2820 | lr 5.96e-05 | t 471s
+step  2325 | loss 0.8131 | lr 5.74e-05 | t 476s
+step  2350 | loss 2.1830 | lr 5.52e-05 | t 482s
+step  2375 | loss 0.9110 | lr 5.31e-05 | t 487s
+step  2400 | loss 1.2250 | lr 5.12e-05 | t 492s
+step  2425 | loss 1.4497 | lr 4.92e-05 | t 497s
+step  2450 | loss 1.3768 | lr 4.74e-05 | t 502s
+step  2475 | loss 2.0964 | lr 4.57e-05 | t 507s
+step  2500 | loss 1.9688 | lr 4.40e-05 | t 512s
+step  2525 | loss 1.6120 | lr 4.24e-05 | t 518s
+step  2550 | loss 1.8091 | lr 4.10e-05 | t 523s
+step  2575 | loss 1.1049 | lr 3.96e-05 | t 528s
+step  2600 | loss 2.5671 | lr 3.83e-05 | t 533s
+step  2625 | loss 1.0950 | lr 3.71e-05 | t 538s
+step  2650 | loss 1.8869 | lr 3.59e-05 | t 543s
+step  2675 | loss 1.8421 | lr 3.49e-05 | t 548s
+step  2700 | loss 1.9882 | lr 3.40e-05 | t 554s
+step  2725 | loss 1.0187 | lr 3.32e-05 | t 559s
+step  2750 | loss 1.4837 | lr 3.24e-05 | t 564s
+step  2775 | loss 1.6601 | lr 3.18e-05 | t 569s
+step  2800 | loss 2.0984 | lr 3.12e-05 | t 574s
+step  2825 | loss 1.8437 | lr 3.08e-05 | t 579s
+step  2850 | loss 2.4375 | lr 3.05e-05 | t 585s
+step  2875 | loss 1.5953 | lr 3.02e-05 | t 590s
+step  2900 | loss 1.2417 | lr 3.01e-05 | t 595s
+step  2925 | loss 1.0390 | lr 3.00e-05 | t 600s
+Evaluating held-out loss...
+WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder
+  eval_loss: 0.8359
+Evaluating acceptance length...
+WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder
+WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder
+  per_position_acc: ['0.500', '0.667', '0.000', '0.000', '0.333', '0.333', '0.000']

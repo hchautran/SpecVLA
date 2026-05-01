@@ -1,0 +1,98 @@
+_wandb:
+    value:
+        cli_version: 0.26.1
+        e:
+            r04m2bp3oywno487n7xr7cpfg533k0rr:
+                codePath: train.py
+                codePathLocal: train.py
+                cpu_count: 32
+                cpu_count_logical: 32
+                cudaVersion: "13.0"
+                disk:
+                    /:
+                        total: "61285326848"
+                        used: "39829557248"
+                email: tranhoaichau.00@gmail.com
+                executable: /media/volume/Chau/autoresearch/.venv/bin/python
+                git:
+                    commit: edab23ad86468c4d98f0e1df33e119a7d4bd275a
+                    remote: git@github.com:hchautran/autoresearch.git
+                gpu: NVIDIA A100-SXM4-40GB
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ampere
+                      cudaCores: 6912
+                      memoryTotal: "42949672960"
+                      name: NVIDIA A100-SXM4-40GB
+                      uuid: GPU-d417de09-1afb-2b04-9a9a-8639e57569b0
+                host: robot2
+                memory:
+                    total: "123626672128"
+                os: Linux-6.17.0-22-generic-x86_64-with-glibc2.39
+                program: /media/volume/Chau/autoresearch/train.py
+                python: CPython 3.12.13
+                root: /media/volume/Chau/autoresearch
+                startedAt: "2026-04-30T22:19:15.025241Z"
+                writerId: r04m2bp3oywno487n7xr7cpfg533k0rr
+        m: []
+        python_version: 3.12.13
+        t:
+            "1":
+                - 1
+                - 11
+                - 41
+                - 49
+            "2":
+                - 1
+                - 11
+                - 41
+                - 49
+                - 51
+            "3":
+                - 2
+                - 16
+                - 61
+                - 62
+            "4": 3.12.13
+            "5": 0.26.1
+            "6": 5.3.0
+            "12": 0.26.1
+            "13": linux-x86_64
+attention_dropout:
+    value: 0
+batch_size:
+    value: 4
+block_size:
+    value: 8
+distill_alpha:
+    value: 0.5
+grad_clip:
+    value: 1
+inner_steps:
+    value: 4
+intermediate_size:
+    value: 8192
+log_every:
+    value: 100
+loss_decay_gamma:
+    value: 4
+lr:
+    value: 0.0003
+num_attn_heads:
+    value: 16
+num_hidden_layers:
+    value: 3
+num_kv_heads:
+    value: 4
+num_workers:
+    value: 4
+rms_norm_eps:
+    value: 1e-06
+rope_theta:
+    value: 1e+06
+time_budget:
+    value: 600
+warmup_steps:
+    value: 100
+weight_decay:
+    value: 0.01

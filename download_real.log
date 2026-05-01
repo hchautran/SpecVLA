@@ -1,0 +1,7 @@
+Downloading lerobot/pi0fast-base...
+Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files:  17%|█▋        | 1/6 [00:00<00:00,  5.63it/s]Fetching 6 files:  67%|██████▋   | 4/6 [00:19<00:10,  5.25s/it]Fetching 6 files: 100%|██████████| 6/6 [00:19<00:00,  3.25s/it]
+  -> /media/volume/Chau/.cache/autoresearch/huggingface/hub/models--lerobot--pi0fast-base/snapshots/0737e07fac1e63519c0bd38bd869934ecd9c3f86
+Downloading lerobot/fast-action-tokenizer...
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  4.94it/s]Fetching 10 files:  90%|█████████ | 9/10 [00:00<00:00, 35.72it/s]Fetching 10 files: 100%|██████████| 10/10 [00:00<00:00, 31.97it/s]
+  -> /media/volume/Chau/.cache/autoresearch/huggingface/hub/models--lerobot--fast-action-tokenizer/snapshots/3d4d8dd847c5333f1cb0f54d00074ba22b14a5b7
+Done
