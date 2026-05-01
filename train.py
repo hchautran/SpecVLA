@@ -274,26 +274,41 @@ def make_drafter(target_policy, drafter_cfg: DrafterConfig) -> Drafter:
 # ---------------------------------------------------------------------------
 
 def sample_masked_block(true_tokens, true_mask, block_size, mask_token_id):
-    """Pick one random block per batch row; mask positions 1..B-1.
+    """Pick one random block per batch row; noise-schedule mask non-seed positions.
 
-    Returns (block_ids, block_targets, block_valid, starts) where block_ids
-    is what the drafter sees (position 0 is the true token, rest are mask)
-    and block_targets / block_valid are aligned ground-truth + validity.
+    Per-row mask probability p ~ U(0, 1); each non-seed position is iid masked
+    with prob p. Eval/inference always have all 1..B-1 masked (p=1), so this
+    is a strict superset of the eval distribution and acts as augmentation
+    against overfitting to the all-mask pattern (which empirically tanks
+    real_accept_len in bench).
+
+    Returns (block_ids, block_targets, block_valid, was_masked, starts) where
+    was_masked[b, k] is True for positions the drafter must predict.
     """
     B, T = true_tokens.shape
     device = true_tokens.device
     max_start = max(1, T - block_size)
     starts = torch.randint(0, max_start, (B,), device=device)
 
-    block_ids     = torch.full((B, block_size), mask_token_id, dtype=torch.long, device=device)
     block_targets = torch.empty((B, block_size), dtype=torch.long, device=device)
     block_valid   = torch.empty((B, block_size), dtype=torch.bool, device=device)
     for b in range(B):
         s = starts[b].item()
         block_targets[b] = true_tokens[b, s:s + block_size]
         block_valid[b]   = true_mask[b, s:s + block_size]
-        block_ids[b, 0]  = true_tokens[b, s]
-    return block_ids, block_targets, block_valid, starts
+
+    p = torch.rand(B, 1, device=device)
+    mask_pattern = torch.rand(B, block_size - 1, device=device) < p  # (B, B-1)
+    was_masked = torch.zeros((B, block_size), dtype=torch.bool, device=device)
+    was_masked[:, 1:] = mask_pattern
+
+    block_ids = block_targets.clone()
+    block_ids[:, 1:] = torch.where(
+        mask_pattern,
+        torch.full_like(block_ids[:, 1:], mask_token_id),
+        block_targets[:, 1:],
+    )
+    return block_ids, block_targets, block_valid, was_masked, starts
 
 
 def cached_target_forward(target_policy, batch, preprocessor):
@@ -315,7 +330,7 @@ def drafter_loss(drafter, target_comp, target_out, fast_hiddens, drafter_cfg):
     if true_tokens.shape[1] < drafter_cfg.block_size + 1:
         return None
 
-    block_ids, block_targets, block_valid, starts = sample_masked_block(
+    block_ids, block_targets, block_valid, was_masked, starts = sample_masked_block(
         true_tokens, true_mask, drafter_cfg.block_size, drafter.mask_token_id
     )
 
@@ -346,6 +361,7 @@ def drafter_loss(drafter, target_comp, target_out, fast_hiddens, drafter_cfg):
     pred_logits  = logits[:, :-1].reshape(-1, logits.size(-1))
     pred_targets = block_targets[:, 1:].reshape(-1)
     pred_valid   = block_valid[:, 1:].reshape(-1).float()
+    pred_masked  = was_masked[:, 1:].reshape(-1).float()
 
     # Position-wise loss decay (DFlash Eq. 4): early-block errors are more
     # costly because they invalidate everything after them under spec-decode's
@@ -355,7 +371,7 @@ def drafter_loss(drafter, target_comp, target_out, fast_hiddens, drafter_cfg):
     pos_weights = pos_weights[None, :].expand(B, -1).reshape(-1)
 
     loss_per_tok = F.cross_entropy(pred_logits, pred_targets, reduction="none")
-    weight = pred_valid * pos_weights
+    weight = pred_valid * pred_masked * pos_weights
     loss = (loss_per_tok * weight).sum() / weight.sum().clamp(min=1)
     return loss
 
