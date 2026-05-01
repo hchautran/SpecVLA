@@ -73,26 +73,27 @@ grep "^accept_len:" run.log
 
 When an experiment is done, log it to `results.tsv` (tab-separated, NOT comma-separated — commas break in descriptions).
 
-The TSV has a header row and 5 columns:
+The TSV has a header row and 6 columns:
 
 ```
-commit	accept_len	memory_gb	status	description
+commit	accept_len	memory_gb	speedup	status	description
 ```
 
 1. git commit hash (short, 7 chars)
 2. `accept_len` achieved (e.g. 1.842300) — use 0.000000 for crashes
 3. peak memory in GB, round to .1f (e.g. 56.6 — divide peak_vram_mb by 1024) — use 0.0 for crashes
-4. status: `keep`, `discard`, or `crash`
-5. short text description of what this experiment tried
+4. `speedup` from `bench.py` (e.g. 1.50 — naive_ms_per_chunk / spec_ms_per_chunk) — use `—` if bench was skipped, 0.0 for crashes
+5. status: `keep`, `discard`, or `crash`
+6. short text description of what this experiment tried
 
 Example:
 
 ```
-commit	accept_len	memory_gb	status	description
-a1b2c3d	1.842300	56.6	keep	baseline
-b2c3d4e	1.910100	57.0	keep	block_size 4 -> 6
-c3d4e5f	1.812000	56.5	discard	swap mask token to <unk>
-d4e5f6g	0.000000	0.0	crash	8-layer drafter (OOM)
+commit	accept_len	memory_gb	speedup	status	description
+a1b2c3d	1.842300	56.6	1.20	keep	baseline
+b2c3d4e	1.910100	57.0	1.35	keep	block_size 4 -> 6
+c3d4e5f	1.812000	56.5	1.18	discard	swap mask token to <unk>
+d4e5f6g	0.000000	0.0	0.0	crash	8-layer drafter (OOM)
 ```
 
 ## The experiment loop
@@ -105,15 +106,16 @@ LOOP FOREVER:
 2. Tune `train.py` with an experimental idea by directly hacking the code.
 3. git commit
 4. Run the experiment: `uv run train.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
-5. Read out the results: `grep "^accept_len:\|^peak_vram_mb:" run.log`
+5. Read out the training results: `grep "^accept_len:\|^peak_vram_mb:" run.log`
 6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
-7. Record the results in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git)
-8. If `accept_len` improved (**higher**), you "advance" the branch, keeping the git commit
-9. If `accept_len` is equal or worse, you git reset back to where you started
+7. Run the end-to-end speedup benchmark: `uv run bench.py > bench.log 2>&1`. This loads the drafter checkpoint that `train.py` saved to `~/.cache/autoresearch/drafter.pt` and times spec-decoding vs naive autoregressive pi0-fast on val chunks. Read out the speedup: `grep "^speedup:" bench.log` (format: `1.50x`).
+8. If bench crashes (drafter checkpoint missing, OOM, etc.), record `speedup` as `—` for the row but keep `accept_len` — the training metric is still primary.
+9. Record both `accept_len` and `speedup` in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git)
+10. **Keep/discard rule**: `accept_len` is the primary metric (higher better). `speedup` is the secondary signal — a higher `accept_len` that lowers `speedup` (e.g. a drafter so big it negates per-chunk savings) is a wash; advance only if `speedup` did not regress materially. If `accept_len` improved AND `speedup` did not regress, advance the branch. Otherwise reset.
 
 The idea is that you are a completely autonomous researcher trying things out. If they work, keep. If they don't, discard. And you're advancing the branch so that you can iterate. If you feel like you're getting stuck in some way, you can rewind but you should probably do this very very sparingly (if ever).
 
-**Timeout**: Each experiment should take ~5 minutes of training + ~1 minute of eval (acceptance-length eval pulls 16 batches of size 2 through the frozen target and the drafter). If a run exceeds 12 minutes, kill it and treat it as a failure (discard and revert).
+**Timeout**: Each `train.py` invocation runs for **1 epoch** through the LIBERO train split, then ~1 minute of acceptance-length eval (16 val batches × 2). `bench.py` then takes another ~30s of decoding. If a run exceeds 30 minutes total, kill it and treat it as a failure (discard and revert).
 
 **Crashes**: If a run crashes (OOM, or a bug, or etc.), use your judgment: If it's something dumb and easy to fix (e.g. a typo, a missing import), fix it and re-run. If the idea itself is fundamentally broken, just skip it, log "crash" as the status in the tsv, and move on.
 
