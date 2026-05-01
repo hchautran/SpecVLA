@@ -356,22 +356,8 @@ def drafter_loss(drafter, target_comp, target_out, fast_hiddens, drafter_cfg):
 
     loss_per_tok = F.cross_entropy(pred_logits, pred_targets, reduction="none")
     weight = pred_valid * pos_weights
-    ce_loss = (loss_per_tok * weight).sum() / weight.sum().clamp(min=1)
-
-    # KL distillation aux: align drafter to target's own predictions.
-    # target_out["fast_logits"][b, t] predicts the token at fast position t+1,
-    # which matches the drafter's pred at relative position t-starts[b].
-    target_logits = target_out["fast_logits"]
-    target_block = torch.stack(
-        [target_logits[b, starts[b]:starts[b] + drafter_cfg.block_size - 1]
-         for b in range(B)], dim=0,
-    ).reshape(-1, target_logits.size(-1))
-    log_p_student = F.log_softmax(pred_logits.float(), dim=-1)
-    p_teacher = F.softmax(target_block.float(), dim=-1)
-    kl_per_tok = F.kl_div(log_p_student, p_teacher, reduction="none").sum(dim=-1)
-    kl_loss = (kl_per_tok * weight).sum() / weight.sum().clamp(min=1)
-
-    return ce_loss + 0.1 * kl_loss
+    loss = (loss_per_tok * weight).sum() / weight.sum().clamp(min=1)
+    return loss
 
 
 def train_step(drafter, target_policy, target_comp, batch, preprocessor, drafter_cfg):
