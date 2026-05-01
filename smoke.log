@@ -27,7 +27,7 @@ Evaluating held-out loss...
 /media/volume/Chau/autoresearch/.venv/lib/python3.12/site-packages/torchvision/io/_video_deprecation_warning.py:9: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
   warnings.warn(
 WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder
-  eval_loss: 25.9249
+  eval_loss: 24.7968
 Evaluating acceptance length...
 /media/volume/Chau/autoresearch/.venv/lib/python3.12/site-packages/torchvision/io/_video_deprecation_warning.py:9: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
   warnings.warn(
@@ -42,9 +42,9 @@ WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platfor
 
 ---
 accept_len:       0.0000
-training_seconds: 0.9
-eval_seconds:     13.9
-total_seconds:    16.7
+training_seconds: 0.6
+eval_seconds:     7.5
+total_seconds:    8.9
 peak_vram_mb:     11148.9
 num_steps:        2
 num_params_M:     258.0

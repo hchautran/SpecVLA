@@ -55,3 +55,23 @@ step  4000 | loss 1.5941 | lr 1.32e-04 | t 348s
 step  4100 | loss 1.5315 | lr 1.21e-04 | t 363s
 step  4200 | loss 1.2661 | lr 1.09e-04 | t 381s
 step  4300 | loss 0.7504 | lr 9.98e-05 | t 396s
+step  4400 | loss 1.1874 | lr 9.11e-05 | t 411s
+step  4500 | loss 0.6397 | lr 8.28e-05 | t 425s
+step  4600 | loss 1.1862 | lr 7.49e-05 | t 440s
+step  4700 | loss 0.7497 | lr 6.76e-05 | t 454s
+step  4800 | loss 1.1194 | lr 6.09e-05 | t 468s
+step  4900 | loss 1.0820 | lr 5.47e-05 | t 483s
+step  5000 | loss 1.1435 | lr 4.90e-05 | t 498s
+step  5100 | loss 1.2155 | lr 4.39e-05 | t 513s
+step  5200 | loss 1.1134 | lr 3.96e-05 | t 528s
+step  5300 | loss 1.3562 | lr 3.62e-05 | t 542s
+step  5400 | loss 1.1750 | lr 3.35e-05 | t 556s
+step  5500 | loss 0.7597 | lr 3.14e-05 | t 573s
+step  5600 | loss 1.3027 | lr 3.01e-05 | t 595s
+Evaluating held-out loss...
+WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder
+  eval_loss: 0.5627
+Evaluating acceptance length...
+WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder
+WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder
+  per_position_acc: ['0.500', '1.000', '0.333', '0.000', '0.333', '0.333', '0.333']
