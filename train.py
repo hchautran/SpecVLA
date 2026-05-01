@@ -205,7 +205,7 @@ class Drafter(Qwen3PreTrainedModel):
 @dataclass
 class DrafterConfig:
     block_size:        int  = 8
-    num_hidden_layers: int  = 3
+    num_hidden_layers: int  = 2
     num_attn_heads:    int  = 16
     num_kv_heads:      int  = 4
     intermediate_size: int  = 2048
