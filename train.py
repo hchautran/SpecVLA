@@ -40,6 +40,7 @@ from torch import nn
 import wandb
 
 from prepare import (
+    CACHE_DIR,
     TIME_BUDGET,
     TARGET_HIDDEN_SIZE, TARGET_NUM_LAYERS,
     EVAL_BATCHES, EVAL_BATCH_SIZE, EVAL_SEED,
@@ -657,6 +658,18 @@ def main():
     wandb.summary["accept_len"] = accept_len
     wandb.summary["eval_loss"]  = eval_loss
     wandb.finish()
+
+    # Save drafter checkpoint for bench.py.
+    if not args.smoke:
+        ckpt_path = os.path.join(CACHE_DIR, "drafter.pt")
+        # Unwrap torch.compile wrapper if present.
+        sd_module = getattr(drafter, "_orig_mod", drafter)
+        torch.save({
+            "state_dict": sd_module.state_dict(),
+            "drafter_cfg": drafter_cfg.__dict__,
+            "accept_len": float(accept_len),
+        }, ckpt_path)
+        print(f"  saved drafter checkpoint to {ckpt_path}")
 
     print()
     print("---")
