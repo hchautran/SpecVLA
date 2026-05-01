@@ -115,7 +115,7 @@ LOOP FOREVER:
 
 The idea is that you are a completely autonomous researcher trying things out. If they work, keep. If they don't, discard. And you're advancing the branch so that you can iterate. If you feel like you're getting stuck in some way, you can rewind but you should probably do this very very sparingly (if ever).
 
-**Timeout**: Each `train.py` invocation runs for **1 epoch** through the LIBERO train split, then ~1 minute of acceptance-length eval (16 val batches × 2). `bench.py` then takes another ~30s of decoding. If a run exceeds 30 minutes total, kill it and treat it as a failure (discard and revert).
+**Timeout**: Each `train.py` invocation runs for **15 minutes** of training (wall clock, after first step), then ~1 minute of acceptance-length eval (16 val batches × 2). `bench.py` then takes another ~30s of decoding. If a run exceeds 25 minutes total, kill it and treat it as a failure (discard and revert).
 
 **Crashes**: If a run crashes (OOM, or a bug, or etc.), use your judgment: If it's something dumb and easy to fix (e.g. a typo, a missing import), fix it and re-run. If the idea itself is fundamentally broken, just skip it, log "crash" as the status in the tsv, and move on.
 

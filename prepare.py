@@ -56,7 +56,7 @@ import torch
 # Constants (fixed, do not modify)
 # ---------------------------------------------------------------------------
 
-TIME_BUDGET = 600                # training time budget in seconds (10 minutes)
+TIME_BUDGET = 900                # training time budget in seconds (15 minutes)
 
 # Hub artifacts — match docs/source/pi0fast.mdx LIBERO recipe
 DATASET_REPO_ID    = "lerobot/libero"

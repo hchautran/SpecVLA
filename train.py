@@ -41,6 +41,7 @@ import wandb
 
 from prepare import (
     CACHE_DIR,
+    TIME_BUDGET,
     TARGET_HIDDEN_SIZE, TARGET_NUM_LAYERS,
     EVAL_BATCHES, EVAL_BATCH_SIZE, EVAL_SEED,
     load_target_policy, target_components,
@@ -536,7 +537,7 @@ def main():
     wandb.init(
         project=args.wandb_project,
         mode="disabled" if args.smoke else args.wandb_mode,
-        config={**drafter_cfg.__dict__, **train_cfg.__dict__, "n_epochs": 1},
+        config={**drafter_cfg.__dict__, **train_cfg.__dict__, "time_budget": TIME_BUDGET},
     )
 
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -569,29 +570,36 @@ def main():
     )
 
     inner_steps = 1 if args.smoke else train_cfg.inner_steps
-    total_inner_steps = max(1, len(train_loader) * inner_steps)
 
-    def lr_at(step):
+    def lr_at(step, train_t0):
         if step < train_cfg.warmup_steps:
             return step / max(1, train_cfg.warmup_steps)
-        # Cosine decay from 1.0 -> 0.1 over the 1-epoch budget (in inner steps).
-        progress = min(1.0, (step - train_cfg.warmup_steps) /
-                       max(1, total_inner_steps - train_cfg.warmup_steps))
+        if train_t0 is None:
+            return 1.0
+        # Cosine decay from 1.0 -> 0.1 over the wall-clock training budget.
+        progress = min(1.0, (time.time() - train_t0) / TIME_BUDGET)
         return 0.1 + 0.45 * (1.0 + math.cos(math.pi * progress))
 
     if args.smoke:
         print("Smoke: running 2 train steps + 1 eval batch...")
     else:
-        print(f"Training (1 epoch = {len(train_loader)} batches, "
-              f"~{total_inner_steps} grad updates @ inner_steps={inner_steps})...")
+        print(f"Training (budget = {TIME_BUDGET}s, inner_steps={inner_steps})...")
     overall_t0 = time.time()
     train_t0 = None
     step = 0
     losses = []
+    data_iter = iter(train_loader)
 
-    for batch in train_loader:
+    while True:
         if args.smoke and step >= 2:
             break
+        if not args.smoke and train_t0 is not None and time.time() - train_t0 >= TIME_BUDGET:
+            break
+        try:
+            batch = next(data_iter)
+        except StopIteration:
+            data_iter = iter(train_loader)
+            batch = next(data_iter)
 
         if args.smoke and step == 0:
             _smoke_sanity_check(target_policy, preprocessor, batch)
@@ -601,7 +609,7 @@ def main():
 
         for _ in range(inner_steps):
             for g in optimizer.param_groups:
-                g["lr"] = train_cfg.lr * lr_at(step)
+                g["lr"] = train_cfg.lr * lr_at(step, train_t0)
 
             loss = drafter_loss(drafter, target_comp, target_out, fast_hiddens, drafter_cfg)
             if loss is None:
@@ -627,7 +635,7 @@ def main():
             if step % train_cfg.log_every == 0:
                 recent = sum(losses[-train_cfg.log_every:]) / min(len(losses), train_cfg.log_every)
                 elapsed = time.time() - train_t0
-                print(f"step {step:5d}/{total_inner_steps} | loss {recent:.4f} | "
+                print(f"step {step:5d} | loss {recent:.4f} | "
                       f"lr {optimizer.param_groups[0]['lr']:.2e} | t {elapsed:.0f}s")
 
     train_seconds = time.time() - (train_t0 or time.time())
