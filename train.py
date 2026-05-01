@@ -212,7 +212,7 @@ class DrafterConfig:
     rms_norm_eps:      float = 1e-6
     rope_theta:        float = 1_000_000.0
     attention_dropout: float = 0.0
-    loss_decay_gamma:  float = 4.0  # DFlash paper Eq. 4: w_k = exp(-(k-1)/γ)
+    loss_decay_gamma:  float = 8.0  # DFlash paper Eq. 4: w_k = exp(-(k-1)/γ)
 
 
 @dataclass
