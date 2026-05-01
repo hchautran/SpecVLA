@@ -208,7 +208,7 @@ class DrafterConfig:
     num_hidden_layers: int  = 3
     num_attn_heads:    int  = 16
     num_kv_heads:      int  = 4
-    intermediate_size: int  = 2048
+    intermediate_size: int  = 1024
     rms_norm_eps:      float = 1e-6
     rope_theta:        float = 1_000_000.0
     attention_dropout: float = 0.0
