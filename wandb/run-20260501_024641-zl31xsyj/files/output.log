@@ -1,0 +1,5 @@
+Loading frozen target (pi0-fast)...
+WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder
+The PI0Fast model is a direct port of the OpenPI implementation.
+This implementation follows the original OpenPI structure for compatibility.
+Original implementation: https://github.com/Physical-Intelligence/openpi
