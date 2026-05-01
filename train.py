@@ -163,18 +163,19 @@ class Drafter(Qwen3PreTrainedModel):
     def __init__(self, config) -> None:
         super().__init__(config)
         self.config = config
+        # Submodule creation order matches dflash.model.DFlashDraftModel so
+        # post_init's RNG sequence (and therefore initial weights) match too.
+        self.layers = nn.ModuleList([DraftLayer(config, i) for i in range(config.num_hidden_layers)])
         self.target_layer_ids = list(self.config.dflash_config.get(
             "target_layer_ids",
             build_target_layer_ids(config.num_target_layers, config.num_hidden_layers),
         ))
-        self.mask_token_id = self.config.dflash_config.get("mask_token_id", None)
-        self.block_size = config.block_size
-
+        self.norm = Qwen3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.rotary_emb = Qwen3RotaryEmbedding(config)
         self.fc = nn.Linear(len(self.target_layer_ids) * config.hidden_size, config.hidden_size, bias=False)
         self.hidden_norm = Qwen3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.rotary_emb = Qwen3RotaryEmbedding(config)
-        self.layers = nn.ModuleList([DraftLayer(config, i) for i in range(config.num_hidden_layers)])
-        self.norm = Qwen3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.block_size = config.block_size
+        self.mask_token_id = self.config.dflash_config.get("mask_token_id", None)
         self.post_init()
 
     def forward(
