@@ -576,9 +576,9 @@ def main():
             return step / max(1, train_cfg.warmup_steps)
         if train_t0 is None:
             return 1.0
-        # Cosine decay from 1.0 -> 0.1 over the wall-clock training budget.
+        # Cosine decay from 1.0 -> 0.0 over the wall-clock training budget.
         progress = min(1.0, (time.time() - train_t0) / TIME_BUDGET)
-        return 0.1 + 0.45 * (1.0 + math.cos(math.pi * progress))
+        return 0.5 * (1.0 + math.cos(math.pi * progress))
 
     if args.smoke:
         print("Smoke: running 2 train steps + 1 eval batch...")
