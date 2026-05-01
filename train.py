@@ -1,9 +1,12 @@
 """
 Autoresearch DFlash-drafter training script. Single-GPU, single-file.
 
-Trains a DFlash-style block-diffusion drafter for the autoregressive pi0-fast
-VLA on the LIBERO dataset. The target (pi0-fast) is loaded frozen via
-prepare.py; the drafter is the only thing that gets gradients.
+Trains a block-diffusion drafter for the autoregressive pi0-fast VLA on the
+LIBERO dataset. The target (pi0-fast) is loaded frozen via prepare.py; the
+drafter is the only thing that gets gradients. The drafter architecture is
+inlined here (class `Drafter` below) so the autoresearch loop can modify
+attention, depth, init, mask handling, etc. without touching the vendored
+dflash package. The forward signature must match what the fixed eval expects.
 
 Objective (per batch):
   1. Run target (no grad) → prefix hidden states + true FAST action tokens.
@@ -29,9 +32,11 @@ import argparse
 import math
 import time
 from dataclasses import dataclass
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
+from torch import nn
 import wandb
 
 from prepare import (
@@ -44,8 +49,151 @@ from prepare import (
     evaluate_acceptance_length,
 )
 
-from dflash.model import DFlashDraftModel, extract_context_feature
-from transformers import Qwen3Config
+# extract_context_feature is also used by prepare.evaluate_acceptance_length and
+# is a trivial concat helper — keep importing from the vendored dflash so train
+# and eval agree on layer-id semantics. Everything else (the model itself) is
+# inlined below so the autoresearch loop can modify drafter architecture freely.
+from dflash.model import extract_context_feature
+from transformers import Qwen3Config, Qwen3PreTrainedModel
+from transformers.models.qwen3.modeling_qwen3 import (
+    Qwen3RMSNorm, Qwen3RotaryEmbedding, Qwen3MLP, rotate_half, eager_attention_forward,
+)
+from transformers.cache_utils import Cache
+
+
+# ---------------------------------------------------------------------------
+# Drafter architecture (inlined from dflash; modifiable)
+#
+# Mirrors dflash.model.DFlashDraftModel's forward signature exactly so the
+# fixed eval (prepare.evaluate_acceptance_length) keeps working unchanged:
+#   drafter(target_hidden=..., noise_embedding=..., position_ids=...,
+#           past_key_values=None, use_cache=False, is_causal=False)
+# Required attributes: drafter.block_size, drafter.mask_token_id,
+# drafter.target_layer_ids.
+# ---------------------------------------------------------------------------
+
+def build_target_layer_ids(num_target_layers: int, num_draft_layers: int):
+    if num_draft_layers == 1:
+        return [num_target_layers // 2]
+    start, end = 1, num_target_layers - 3
+    span = end - start
+    return [int(round(start + (i * span) / (num_draft_layers - 1)))
+            for i in range(num_draft_layers)]
+
+
+def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
+    cos = cos.unsqueeze(unsqueeze_dim)
+    sin = sin.unsqueeze(unsqueeze_dim)
+    q_len = q.size(-2)
+    q_embed = (q * cos[..., -q_len:, :]) + (rotate_half(q) * sin[..., -q_len:, :])
+    k_embed = (k * cos) + (rotate_half(k) * sin)
+    return q_embed, k_embed
+
+
+class DraftAttention(nn.Module):
+    """Cross+self attention: q from noise, k/v from cat([target_hidden, noise])."""
+
+    def __init__(self, config: Qwen3Config, layer_idx: int):
+        super().__init__()
+        self.config = config
+        self.layer_idx = layer_idx
+        self.head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
+        self.num_key_value_groups = config.num_attention_heads // config.num_key_value_heads
+        self.scaling = self.head_dim ** -0.5
+        self.attention_dropout = config.attention_dropout
+        self.is_causal = False
+        self.q_proj = nn.Linear(config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias)
+        self.k_proj = nn.Linear(config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias)
+        self.v_proj = nn.Linear(config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias)
+        self.o_proj = nn.Linear(config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias)
+        self.q_norm = Qwen3RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.k_norm = Qwen3RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.sliding_window = None
+
+    def forward(self, hidden_states, target_hidden, position_embeddings, attention_mask=None, **kwargs):
+        bsz, q_len = hidden_states.shape[:-1]
+        ctx_len = target_hidden.shape[1]
+        q = self.q_proj(hidden_states).view(bsz, q_len, -1, self.head_dim)
+        q = self.q_norm(q).transpose(1, 2)
+        k_ctx = self.k_proj(target_hidden)
+        k_noise = self.k_proj(hidden_states)
+        v_ctx = self.v_proj(target_hidden)
+        v_noise = self.v_proj(hidden_states)
+        k = torch.cat([k_ctx, k_noise], dim=1).view(bsz, ctx_len + q_len, -1, self.head_dim)
+        v = torch.cat([v_ctx, v_noise], dim=1).view(bsz, ctx_len + q_len, -1, self.head_dim)
+        k = self.k_norm(k).transpose(1, 2)
+        v = v.transpose(1, 2)
+        cos, sin = position_embeddings
+        q, k = apply_rotary_pos_emb(q, k, cos, sin)
+        attn_output, _ = eager_attention_forward(
+            self, q, k, v, attention_mask,
+            dropout=0.0 if not self.training else self.attention_dropout,
+            scaling=self.scaling, sliding_window=None,
+        )
+        attn_output = attn_output.reshape(bsz, q_len, -1)
+        return self.o_proj(attn_output)
+
+
+class DraftLayer(nn.Module):
+    def __init__(self, config: Qwen3Config, layer_idx: int):
+        super().__init__()
+        self.self_attn = DraftAttention(config, layer_idx)
+        self.mlp = Qwen3MLP(config)
+        self.input_layernorm = Qwen3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = Qwen3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+
+    def forward(self, hidden_states, target_hidden, position_embeddings, attention_mask=None):
+        residual = hidden_states
+        hidden_states = self.input_layernorm(hidden_states)
+        hidden_states = self.self_attn(hidden_states, target_hidden, position_embeddings, attention_mask)
+        hidden_states = residual + hidden_states
+        residual = hidden_states
+        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = self.mlp(hidden_states)
+        return residual + hidden_states
+
+
+class Drafter(Qwen3PreTrainedModel):
+    """Inlined DFlash drafter. Edit freely — eval only requires the forward
+    signature and the (block_size, mask_token_id, target_layer_ids) attrs.
+    """
+    config_class = Qwen3Config
+    _no_split_modules = ["DraftLayer"]
+
+    def __init__(self, config) -> None:
+        super().__init__(config)
+        self.config = config
+        self.target_layer_ids = list(self.config.dflash_config.get(
+            "target_layer_ids",
+            build_target_layer_ids(config.num_target_layers, config.num_hidden_layers),
+        ))
+        self.mask_token_id = self.config.dflash_config.get("mask_token_id", None)
+        self.block_size = config.block_size
+
+        self.fc = nn.Linear(len(self.target_layer_ids) * config.hidden_size, config.hidden_size, bias=False)
+        self.hidden_norm = Qwen3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.rotary_emb = Qwen3RotaryEmbedding(config)
+        self.layers = nn.ModuleList([DraftLayer(config, i) for i in range(config.num_hidden_layers)])
+        self.norm = Qwen3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_init()
+
+    def forward(
+        self,
+        position_ids: torch.LongTensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        noise_embedding: Optional[torch.Tensor] = None,
+        target_hidden: Optional[torch.Tensor] = None,
+        past_key_values: Optional[Cache] = None,
+        use_cache: bool = False,
+        is_causal: bool = False,
+        **kwargs,
+    ):
+        hidden_states = noise_embedding
+        target_hidden = self.hidden_norm(self.fc(target_hidden))
+        position_embeddings = self.rotary_emb(hidden_states, position_ids)
+        for layer in self.layers:
+            hidden_states = layer(hidden_states, target_hidden, position_embeddings, attention_mask)
+        return self.norm(hidden_states)
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +229,7 @@ class TrainConfig:
 # Drafter construction
 # ---------------------------------------------------------------------------
 
-def make_drafter(target_policy, drafter_cfg: DrafterConfig) -> DFlashDraftModel:
+def make_drafter(target_policy, drafter_cfg: DrafterConfig) -> Drafter:
     target = target_components(target_policy)
     pg_tok = target["paligemma_tokenizer"]
     vocab_size = target["embed_tokens"].weight.shape[0]
@@ -116,7 +264,7 @@ def make_drafter(target_policy, drafter_cfg: DrafterConfig) -> DFlashDraftModel:
         "target_layer_ids": list(range(TARGET_NUM_LAYERS)),
     }
 
-    return DFlashDraftModel(cfg)
+    return Drafter(cfg)
 
 
 # ---------------------------------------------------------------------------

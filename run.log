@@ -7,3 +7,24 @@ wandb: Syncing run northern-frog-51
 wandb: ⭐️ View project at https://wandb.ai/eddiechen372/autoresearch-dflash
 wandb: 🚀 View run at https://wandb.ai/eddiechen372/autoresearch-dflash/runs/6bfzhoxi
 WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.bias
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.weight
+Loading frozen target (pi0-fast)...
+The PI0Fast model is a direct port of the OpenPI implementation. 
+This implementation follows the original OpenPI structure for compatibility. 
+Original implementation: https://github.com/Physical-Intelligence/openpi
+Loading model from: lerobot/pi0fast-base
+✓ Loaded state dict from model.safetensors
+All keys loaded successfully!
+Building drafter...
+Drafter params: 258.0M
+Building dataloader...
+Training (budget = 600s)...
+/media/volume/Chau/autoresearch/.venv/lib/python3.12/site-packages/torchvision/io/_video_deprecation_warning.py:9: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
+  warnings.warn(
+/media/volume/Chau/autoresearch/.venv/lib/python3.12/site-packages/torchvision/io/_video_deprecation_warning.py:9: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
+  warnings.warn(
+/media/volume/Chau/autoresearch/.venv/lib/python3.12/site-packages/torchvision/io/_video_deprecation_warning.py:9: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
+  warnings.warn(
+/media/volume/Chau/autoresearch/.venv/lib/python3.12/site-packages/torchvision/io/_video_deprecation_warning.py:9: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
+  warnings.warn(
