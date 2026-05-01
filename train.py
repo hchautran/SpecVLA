@@ -217,7 +217,7 @@ class DrafterConfig:
 
 @dataclass
 class TrainConfig:
-    batch_size:        int    = 16
+    batch_size:        int    = 8
     num_workers:       int    = 4
     inner_steps:       int    = 4    # drafter gradient updates per heavy target forward
     lr:                float  = 3e-4
