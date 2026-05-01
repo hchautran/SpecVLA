@@ -324,11 +324,6 @@ def drafter_loss(drafter, target_comp, target_out, fast_hiddens, drafter_cfg):
     ctx_blocks = torch.stack(
         [ctx[b, starts[b]:starts[b] + drafter_cfg.block_size] for b in range(B)], dim=0
     )
-    # Train-time ctx noise: the drafter sees slightly perturbed cheat ctx in
-    # training so it doesn't latch onto features that won't survive the
-    # lagged-ctx in real spec decoding (where bench's real_accept_len lives).
-    if drafter.training:
-        ctx_blocks = ctx_blocks + 0.01 * torch.randn_like(ctx_blocks)
 
     noise_emb = embed_tokens(block_ids)
     block_positions = torch.arange(drafter_cfg.block_size, device=block_ids.device)
