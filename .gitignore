@@ -22,3 +22,5 @@ dev/
 # Results file
 results.tsv
 videos_out/
+wandb/
+*.log
