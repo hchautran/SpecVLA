@@ -45,6 +45,15 @@ better). The secondary metric is **`speedup`** from `bench.py` — wall-clock
 speed of (drafter + pi0-fast spec-decode) vs naive AR pi0-fast (higher is
 better).
 
+## Results
+
+![latency per task](latency_per_task.png)
+
+Per-chunk decode latency on LIBERO train tasks for the current drafter
+(`max_decoding_steps=256`, greedy decode). Grey bars are naive AR pi0-fast,
+blue bars are speculative decoding (drafter + pi0-fast); annotations show the
+per-task speedup.
+
 ## Quick start
 
 **Requirements:** A single NVIDIA GPU (tested on A100 40 GB), Python 3.10+.
