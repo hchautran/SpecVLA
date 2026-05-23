@@ -13,7 +13,7 @@ To set up a new experiment, work with the user to:
 1. **Agree on a run tag**: propose a tag based on today's date (e.g. `mar5`). The branch `autoresearch/<tag>` must not already exist — this is a fresh run.
 2. **Create the branch**: `git checkout -b autoresearch/<tag>` from current master.
 3. **Read the in-scope files**: The repo is small. Read these files for full context:
-   - `README.md` — repository context.
+   - `AGENT_GUIDE.md` — the agent's view of the project: which files you may touch, the two metrics, the keep/discard rule. (`README.md` is the researcher-facing description if you want broader project context.)
    - `src/prepare.py` — fixed constants, hub artifacts, dataset/dataloader, frozen target loader, target forward with hidden states, **and the fixed acceptance-length metric**. Do not modify.
    - `scripts/train.py` — the file you modify. Drafter construction, masking, optimizer, training loop.
    - `3rd-party/dflash/dflash/model.py` — the canonical `DFlashDraftModel` you import. Read for context but don't edit (it's a vendored package).

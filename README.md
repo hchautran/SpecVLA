@@ -1,148 +1,97 @@
-# autoresearch — DFlash drafter for pi0-fast
+# Speculative decoding for pi0-fast on LIBERO
 
-![teaser](progress.png)
+A small **DFlash-style block-diffusion drafter** that proposes blocks of FAST action tokens in parallel for the autoregressive **pi0-fast** vision-language-action model, accelerating end-to-end action decoding on the LIBERO benchmark.
 
-Fork of [karpathy/autoresearch](https://github.com/karpathy/autoresearch) repurposed
-for a different task: train a small **DFlash-style block-diffusion drafter** that
-proposes blocks of FAST action tokens in parallel for the autoregressive
-**pi0-fast** VLA on the LIBERO benchmark, then have an autonomous AI agent
-iterate on the drafter — architecture, masking strategy, optimizer, training
-loop — while pi0-fast itself stays frozen.
-
-The agent edits one file (`scripts/train.py`), trains for 1 epoch on the LIBERO action
-sequences, evaluates teacher-forced acceptance length and end-to-end speedup
-vs naive pi0-fast decoding, decides keep-or-discard, and repeats. You wake up
-to a log of experiments and (hopefully) a faster drafter. The human edits
-`program.md` (the agent's "skill"); the agent edits `train.py`.
-
-## How it works
-
-Five files matter:
-
-- **`src/prepare.py`** — fixed constants, hub artifact downloads (LIBERO,
-  pi0-fast-base, FAST tokenizer, PaliGemma), dataloader, frozen target loader,
-  target forward with hidden states, and the **fixed teacher-forced
-  acceptance-length metric**. Read-only.
-- **`scripts/train.py`** — the file the agent edits. Drafter architecture
-  (inlined, see `Drafter` class), block-masking strategy, optimizer, and
-  1-epoch training loop. Saves a drafter checkpoint at the end. **Edited
-  and iterated on by the agent.**
-- **`scripts/bench.py`** — loads the saved drafter checkpoint and benchmarks
-  speculative decoding (drafter + pi0-fast) vs naive autoregressive pi0-fast
-  per chunk on the LIBERO val split. Reports the wall-clock speedup. Run
-  after every `train.py`. Read-only for the agent.
-- **`3rd-party/dflash/`** — vendored DFlash package. The drafter architecture
-  is inlined into `train.py` (so the agent can modify it freely); only the
-  `extract_context_feature` helper is still imported from here so train and
-  eval agree on layer-id semantics.
-- **`program.md`** — the agent's instructions. Point your agent at this and
-  let it go. **Edited by the human.**
-
-By design, each experiment runs for **1 full epoch** through the LIBERO train
-split. The primary metric is **`accept_len`** — the mean teacher-forced
-acceptance length per drafted block (range `[1.0, block_size]`, higher is
-better). The secondary metric is **`speedup`** from `bench.py` — wall-clock
-speed of (drafter + pi0-fast spec-decode) vs naive AR pi0-fast (higher is
-better).
+The drafter is the only thing trained — `pi0-fast` itself stays frozen.
 
 ## Results
 
 ![latency per task](latency_per_task.png)
 
-Per-chunk decode latency on LIBERO train tasks for the current drafter
-(`max_decoding_steps=256`, greedy decode). Grey bars are naive AR pi0-fast,
-blue bars are speculative decoding (drafter + pi0-fast); annotations show the
-per-task speedup.
+Per-chunk decode latency on LIBERO val tasks (`max_decoding_steps=256`, greedy decode). Grey bars are naive autoregressive pi0-fast; blue bars are speculative decoding (drafter + pi0-fast verifier); annotations are per-task speedups.
 
-## Quick start
+Headline numbers from the best checkpoint (commit `9aaff92`, branch `autoresearch/may1`):
 
-**Requirements:** A single NVIDIA GPU (tested on A100 40 GB), Python 3.10+.
+| Metric | Value |
+|---|---|
+| `accept_len` (teacher-forced, primary metric) | **5.25 / 8** |
+| `real_accept_len` (non-teacher-forced) | 5.98 / 8 |
+| `speedup` (per-chunk wall clock) | **4.12×** |
+| Drafter parameters | 98.6 M (1 transformer block) |
+| Target (pi0-fast) | frozen, 3 B params |
 
-Two install paths — pick one:
+`accept_len` ∈ `[1.0, block_size]` measures the mean number of drafted tokens accepted per block under teacher-forced verification — 1.0 means only the verifier's bonus token gets through, `block_size` means every drafted block is fully accepted.
 
-- **`uv`** (upstream-style, this section) — fastest if your environment is clean.
-- **`conda` + `pip`** — see [INSTALLATION.md](INSTALLATION.md) for a tested recipe with the exact version pins this repo was verified against (use this if `uv sync` fights with your system, or if you need to put envs on a non-default disk).
+## What's in the drafter
+
+- **One transformer block** (Qwen3-style: GQA with 16 heads / 4 KV heads, SwiGLU MLP, RoPE).
+- **Cross-attention to all 18 layers of the frozen pi0-fast Gemma trunk** via DFlash's `extract_context_feature` concat.
+- **Block size = 8 FAST action tokens** masked in parallel; position 0 is the verifier's hand-off token, the drafter predicts 1..7.
+- Trained for a fixed 15-minute wall-clock budget per experiment on a single A100, AdamW + cosine LR, batch size 8, `inner_steps=4`.
+
+The full architecture, masking, optimizer, and training loop live in [`scripts/train.py`](scripts/train.py). The frozen-target wiring and the fixed acceptance-length metric live in [`src/prepare.py`](src/prepare.py).
+
+## Setup
+
+See [INSTALLATION.md](INSTALLATION.md). TL;DR:
 
 ```bash
-# 1. Install uv (if you don't already have it)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 2. Install deps + vendored submodules
 uv sync
-git submodule update --init --recursive
+uv pip install "./3rd-party/dflash[transformers]"
+uv pip install -e "./3rd-party/lerobot[pi,libero]"
+uv pip uninstall torchcodec && uv pip install "av>=14"
+uv run src/prepare.py            # one-time HF artifact download (~30 GB)
+```
 
-# 3. Download HF artifacts (one-time, ~5 min, ~30 GB)
-uv run src/prepare.py
+The torchcodec → pyav swap is necessary; the AV1-encoded LIBERO videos don't decode through the pip torchcodec wheel. INSTALLATION.md documents the gotcha in full.
 
-# 4. Smoke check (2 train steps + 1 eval batch, ~30 s)
-uv run scripts/train.py --smoke
+## Reproducing the headline result
 
-# 5. Run a single training experiment (1 epoch, ~10–20 min)
+```bash
+# Train the drafter (~15 min on A100; writes ~/.cache/autoresearch/drafter.pt)
 uv run scripts/train.py
 
-# 6. Benchmark spec decoding vs naive AR (~30 s)
+# Benchmark spec-decode vs naive AR (~30 s)
 uv run scripts/bench.py
 ```
 
-If those all work, your setup is good and you can go into autonomous research mode.
+The training-time accept length (`accept_len`) and the bench-time wall-clock speedup (`speedup`) are the two numbers reported.
 
-## Running the agent
-
-Spin up Claude / Codex / your-agent-of-choice in this repo (and disable
-permission prompts), then prompt:
-
-```
-Hi have a look at program.md and let's kick off a new experiment! let's do the setup first.
-```
-
-`program.md` is the agent's skill. It will:
-
-1. Branch off `master` to `autoresearch/<tag>`.
-2. Read in-scope files, run a smoke check, init `results.tsv`.
-3. Loop forever: edit `scripts/train.py` → commit → `scripts/train.py` →
-   `scripts/bench.py` → log `accept_len` and `speedup` to `results.tsv` →
-   keep-if-improved-else-revert → repeat.
-
-## Project structure
+## Repo layout
 
 ```
 src/
-  prepare.py         — fixed constants, dataloader, frozen target, eval (do not modify)
+  prepare.py         — fixed constants, dataloader, frozen target, eval metric (read-only)
 scripts/
-  train.py           — drafter architecture (inlined), training loop (agent modifies this)
-  bench.py           — spec-decode vs naive AR speedup benchmark (do not modify)
+  train.py           — drafter architecture (inlined), training loop (the file you edit)
+  bench.py           — spec-decode vs naive AR speedup benchmark
   demo.py            — per-chunk decode demo (naive vs spec)
   demo_libero.py     — full LIBERO episode video demo
   save_videos.py     — render side-by-side decoder videos
 3rd-party/
-  dflash/            — vendored DFlash package (read-only)
-  lerobot/           — vendored lerobot (read-only; required for pi0-fast & LIBERO)
-program.md           — agent instructions
-results.tsv          — append-only log of experiments (untracked; written by the agent)
-pyproject.toml       — dependencies
+  dflash/            — vendored DFlash package (block-diffusion drafter family)
+  lerobot/           — vendored lerobot (required for pi0-fast policy & LIBERO dataset)
+results.tsv          — append-only experiment log (untracked; written during runs)
+program.md           — autonomous-research procedure (see AGENT_GUIDE.md)
 ```
 
-## Design choices
+## Autonomous research
 
-- **Single file to modify.** The agent only touches `train.py`. The drafter
-  architecture is inlined as `Drafter` so attention patterns, depth, init,
-  mask handling, etc. are all editable without leaving the file.
-- **1-epoch budget.** Each experiment trains for one full pass through the
-  LIBERO train split, then evaluates. Gives the agent a comparable budget
-  across architectural changes — bigger drafters get less wall-clock per
-  step but the same number of optimizer steps' worth of data.
-- **Two metrics.** `accept_len` (teacher-forced, fixed eval) is primary —
-  higher is better. `speedup` (spec-decode vs naive AR, end-to-end) is
-  secondary — guards against drafters that are accurate but too heavy to
-  actually win on wall-clock.
-- **Self-contained.** Single GPU, single file (modulo vendored deps),
-  two metrics.
+The project was built to be driven by an autonomous coding agent that iterates on `scripts/train.py` in a tight train→bench→keep-or-revert loop. The headline result above is the artifact of ~30 such experiments on the `autoresearch/may1` branch — see `results.tsv` on that branch for the full log.
 
-## Platform support
+If you want to run that loop yourself, read [AGENT_GUIDE.md](AGENT_GUIDE.md) and point Claude/Codex/your-agent at [program.md](program.md).
 
-Tested on A100 40 GB. Should work on any single NVIDIA GPU with ≥24 GB VRAM
-(pi0-fast itself is ~3 B params and dominates memory). CPU / MPS / multi-GPU
-are out of scope.
+## Platform
+
+Single NVIDIA GPU, ≥24 GB VRAM (pi0-fast itself eats ~12 GB; the drafter and batch share the rest). Tested on A100 40 GB. No CPU / MPS / multi-GPU support.
+
+## References
+
+- pi0-fast: [Black et al., 2024](https://www.physicalintelligence.company/research/fast) — the frozen VLA being accelerated.
+- DFlash: [z-lab/dflash](https://github.com/z-lab/dflash) — block-diffusion drafter framework this work is based on.
+- FAST tokenization: [lerobot/fast-action-tokenizer](https://huggingface.co/lerobot/fast-action-tokenizer).
+- Speculative decoding: [Leviathan et al., 2023](https://arxiv.org/abs/2211.17192) — the verifier protocol used at bench time.
+- autoresearch scaffold: forked from [karpathy/autoresearch](https://github.com/karpathy/autoresearch).
 
 ## License
 
