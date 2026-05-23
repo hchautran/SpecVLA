@@ -8,9 +8,8 @@ The drafter is the only thing trained — `pi0-fast` itself stays frozen.
 
 ![latency per task](latency_per_task.png)
 
-Per-chunk decode latency on LIBERO val tasks (`max_decoding_steps=256`, greedy decode). Grey bars are naive autoregressive pi0-fast; blue bars are speculative decoding (drafter + pi0-fast verifier); annotations are per-task speedups.
+Per-chunk decode latency on LIBERO val tasks (`max_decoding_steps=256`, greedy decode). Grey bars are naive autoregressive pi0-fast; blue bars are speculative decoding (drafter + pi0-fast verifier); 
 
-Headline numbers from the best checkpoint (commit `9aaff92`, branch `autoresearch/may1`):
 
 | Metric | Value |
 |---|---|
