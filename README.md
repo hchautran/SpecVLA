@@ -9,7 +9,7 @@ proposes blocks of FAST action tokens in parallel for the autoregressive
 iterate on the drafter — architecture, masking strategy, optimizer, training
 loop — while pi0-fast itself stays frozen.
 
-The agent edits one file (`train.py`), trains for 1 epoch on the LIBERO action
+The agent edits one file (`scripts/train.py`), trains for 1 epoch on the LIBERO action
 sequences, evaluates teacher-forced acceptance length and end-to-end speedup
 vs naive pi0-fast decoding, decides keep-or-discard, and repeats. You wake up
 to a log of experiments and (hopefully) a faster drafter. The human edits
@@ -19,20 +19,20 @@ to a log of experiments and (hopefully) a faster drafter. The human edits
 
 Five files matter:
 
-- **`prepare.py`** — fixed constants, hub artifact downloads (LIBERO,
+- **`src/prepare.py`** — fixed constants, hub artifact downloads (LIBERO,
   pi0-fast-base, FAST tokenizer, PaliGemma), dataloader, frozen target loader,
   target forward with hidden states, and the **fixed teacher-forced
   acceptance-length metric**. Read-only.
-- **`train.py`** — the file the agent edits. Drafter architecture (inlined,
-  see `Drafter` class), block-masking strategy, optimizer, and 1-epoch
-  training loop. Saves a drafter checkpoint at the end. **Edited and iterated
-  on by the agent.**
-- **`bench.py`** — loads the saved drafter checkpoint and benchmarks
+- **`scripts/train.py`** — the file the agent edits. Drafter architecture
+  (inlined, see `Drafter` class), block-masking strategy, optimizer, and
+  1-epoch training loop. Saves a drafter checkpoint at the end. **Edited
+  and iterated on by the agent.**
+- **`scripts/bench.py`** — loads the saved drafter checkpoint and benchmarks
   speculative decoding (drafter + pi0-fast) vs naive autoregressive pi0-fast
   per chunk on the LIBERO val split. Reports the wall-clock speedup. Run
   after every `train.py`. Read-only for the agent.
-- **`dflash/`** — vendored DFlash package. The drafter architecture is
-  inlined into `train.py` (so the agent can modify it freely); only the
+- **`3rd-party/dflash/`** — vendored DFlash package. The drafter architecture
+  is inlined into `train.py` (so the agent can modify it freely); only the
   `extract_context_feature` helper is still imported from here so train and
   eval agree on layer-id semantics.
 - **`program.md`** — the agent's instructions. Point your agent at this and
@@ -47,8 +47,12 @@ better).
 
 ## Quick start
 
-**Requirements:** A single NVIDIA GPU (tested on A100 40 GB), Python 3.10+,
-[uv](https://docs.astral.sh/uv/).
+**Requirements:** A single NVIDIA GPU (tested on A100 40 GB), Python 3.10+.
+
+Two install paths — pick one:
+
+- **`uv`** (upstream-style, this section) — fastest if your environment is clean.
+- **`conda` + `pip`** — see [INSTALLATION.md](INSTALLATION.md) for a tested recipe with the exact version pins this repo was verified against (use this if `uv sync` fights with your system, or if you need to put envs on a non-default disk).
 
 ```bash
 # 1. Install uv (if you don't already have it)
@@ -59,16 +63,16 @@ uv sync
 git submodule update --init --recursive
 
 # 3. Download HF artifacts (one-time, ~5 min, ~30 GB)
-uv run prepare.py
+uv run src/prepare.py
 
 # 4. Smoke check (2 train steps + 1 eval batch, ~30 s)
-uv run train.py --smoke
+uv run scripts/train.py --smoke
 
 # 5. Run a single training experiment (1 epoch, ~10–20 min)
-uv run train.py
+uv run scripts/train.py
 
 # 6. Benchmark spec decoding vs naive AR (~30 s)
-uv run bench.py
+uv run scripts/bench.py
 ```
 
 If those all work, your setup is good and you can go into autonomous research mode.
@@ -86,21 +90,27 @@ Hi have a look at program.md and let's kick off a new experiment! let's do the s
 
 1. Branch off `master` to `autoresearch/<tag>`.
 2. Read in-scope files, run a smoke check, init `results.tsv`.
-3. Loop forever: edit `train.py` → commit → `train.py` → `bench.py` → log
-   `accept_len` and `speedup` to `results.tsv` → keep-if-improved-else-revert
-   → repeat.
+3. Loop forever: edit `scripts/train.py` → commit → `scripts/train.py` →
+   `scripts/bench.py` → log `accept_len` and `speedup` to `results.tsv` →
+   keep-if-improved-else-revert → repeat.
 
 ## Project structure
 
 ```
-prepare.py      — fixed constants, dataloader, frozen target, eval (do not modify)
-train.py        — drafter architecture (inlined), training loop (agent modifies this)
-bench.py        — spec-decode vs naive AR speedup benchmark (do not modify)
-program.md      — agent instructions
-dflash/         — vendored DFlash package (read-only)
-lerobot/        — vendored lerobot (read-only; required for pi0-fast & LIBERO)
-results.tsv     — append-only log of experiments (untracked; written by the agent)
-pyproject.toml  — dependencies
+src/
+  prepare.py         — fixed constants, dataloader, frozen target, eval (do not modify)
+scripts/
+  train.py           — drafter architecture (inlined), training loop (agent modifies this)
+  bench.py           — spec-decode vs naive AR speedup benchmark (do not modify)
+  demo.py            — per-chunk decode demo (naive vs spec)
+  demo_libero.py     — full LIBERO episode video demo
+  save_videos.py     — render side-by-side decoder videos
+3rd-party/
+  dflash/            — vendored DFlash package (read-only)
+  lerobot/           — vendored lerobot (read-only; required for pi0-fast & LIBERO)
+program.md           — agent instructions
+results.tsv          — append-only log of experiments (untracked; written by the agent)
+pyproject.toml       — dependencies
 ```
 
 ## Design choices

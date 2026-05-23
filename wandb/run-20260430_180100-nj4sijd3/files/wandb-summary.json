@@ -1,1 +1,0 @@
-{"eval/peak_vram_mb":10826.9970703125,"train/loss":0,"accept_len":1.75,"eval/accept_len":1.75,"_timestamp":1.7775727986120028e+09,"_wandb":{"runtime":737},"_step":2741,"eval_loss":0.8340638428926468,"_runtime":737.053271112,"eval/train_seconds":600.2025246620178,"eval/loss":0.8340638428926468,"train/lr":5.00000011623444e-05}

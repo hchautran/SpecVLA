@@ -1,9 +1,0 @@
-wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/exouser/.netrc.
-wandb: Currently logged in as: eddiechen372 to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
-wandb: Tracking run with wandb version 0.26.1
-wandb: Run data is saved locally in /media/volume/Chau/autoresearch/wandb/run-20260501_024641-zl31xsyj
-wandb: Run `wandb offline` to turn off syncing.
-wandb: Syncing run laced-snowflake-57
-wandb: ⭐️ View project at https://wandb.ai/eddiechen372/autoresearch-dflash
-wandb: 🚀 View run at https://wandb.ai/eddiechen372/autoresearch-dflash/runs/zl31xsyj
-WARNING:lerobot.utils.import_utils:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder

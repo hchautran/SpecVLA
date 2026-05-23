@@ -1,6 +1,6 @@
 [submodule "dflash"]
-	path = dflash
+	path = 3rd-party/dflash
 	url = https://github.com/z-lab/dflash.git
 [submodule "lerobot"]
-	path = lerobot
+	path = 3rd-party/lerobot
 	url = https://github.com/huggingface/lerobot.git

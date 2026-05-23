@@ -14,11 +14,11 @@ To set up a new experiment, work with the user to:
 2. **Create the branch**: `git checkout -b autoresearch/<tag>` from current master.
 3. **Read the in-scope files**: The repo is small. Read these files for full context:
    - `README.md` — repository context.
-   - `prepare.py` — fixed constants, hub artifacts, dataset/dataloader, frozen target loader, target forward with hidden states, **and the fixed acceptance-length metric**. Do not modify.
-   - `train.py` — the file you modify. Drafter construction, masking, optimizer, training loop.
-   - `dflash/dflash/model.py` — the canonical `DFlashDraftModel` you import. Read for context but don't edit (it's a vendored package).
-4. **Verify data exists**: Check that `~/.cache/autoresearch/huggingface/hub/` contains snapshots of `lerobot/libero`, `lerobot/pi0fast_base`, `lerobot/fast-action-tokenizer`, and `google/paligemma-3b-pt-224`. If not, tell the human to run `uv run prepare.py`.
-5. **Smoke-check the wiring**: Run `uv run train.py --smoke > smoke.log 2>&1`. This trains 2 steps and runs 1 eval batch. Confirm the run prints `accept_len` and a finite training loss. If the smoke run crashes, fix the bug or escalate to the human before starting the real loop.
+   - `src/prepare.py` — fixed constants, hub artifacts, dataset/dataloader, frozen target loader, target forward with hidden states, **and the fixed acceptance-length metric**. Do not modify.
+   - `scripts/train.py` — the file you modify. Drafter construction, masking, optimizer, training loop.
+   - `3rd-party/dflash/dflash/model.py` — the canonical `DFlashDraftModel` you import. Read for context but don't edit (it's a vendored package).
+4. **Verify data exists**: Check that `~/.cache/autoresearch/huggingface/hub/` contains snapshots of `lerobot/libero`, `lerobot/pi0fast_base`, `lerobot/fast-action-tokenizer`, and `google/paligemma-3b-pt-224`. If not, tell the human to run `uv run src/prepare.py`.
+5. **Smoke-check the wiring**: Run `uv run scripts/train.py --smoke > smoke.log 2>&1`. This trains 2 steps and runs 1 eval batch. Confirm the run prints `accept_len` and a finite training loss. If the smoke run crashes, fix the bug or escalate to the human before starting the real loop.
 6. **Initialize results.tsv**: Create `results.tsv` with just the header row. The baseline will be recorded after the first run.
 7. **Confirm and go**: Confirm setup looks good.
 
@@ -26,16 +26,16 @@ Once you get confirmation, kick off the experimentation.
 
 ## Experimentation
 
-Each experiment runs on a single GPU. The training script runs for a **fixed time budget of 5 minutes** (wall clock training time, excluding setup/eval). You launch it simply as: `uv run train.py`.
+Each experiment runs on a single GPU. The training script runs for a **fixed time budget of 5 minutes** (wall clock training time, excluding setup/eval). You launch it simply as: `uv run scripts/train.py`.
 
 **What you CAN do:**
-- Modify `train.py` — this is the only file you edit. Everything is fair game: drafter depth/width, attention head counts, block size, mask token id, masking schedule, optimizer (AdamW / Muon / Lion / etc.), LR schedule, batch size, weight decay, gradient clipping, what fraction of positions to mask, whether to use a noise schedule à la diffusion vs. fixed all-but-first masking, whether to add auxiliary KL-to-target losses, etc.
+- Modify `scripts/train.py` — this is the only file you edit. Everything is fair game: drafter depth/width, attention head counts, block size, mask token id, masking schedule, optimizer (AdamW / Muon / Lion / etc.), LR schedule, batch size, weight decay, gradient clipping, what fraction of positions to mask, whether to use a noise schedule à la diffusion vs. fixed all-but-first masking, whether to add auxiliary KL-to-target losses, etc.
 
 **What you CANNOT do:**
-- Modify `prepare.py`. It is read-only. It contains the fixed evaluation, dataset/dataloader, target loader, and training constants (time budget, target shape constants, eval batches, etc.).
+- Modify `src/prepare.py`. It is read-only. It contains the fixed evaluation, dataset/dataloader, target loader, and training constants (time budget, target shape constants, eval batches, etc.).
 - Modify the target. `pi0-fast` is frozen. `prepare.load_target_policy` already calls `requires_grad_(False)`; don't unfreeze it.
-- Modify `dflash/`. The vendored package is treated as read-only. If you want a different drafter forward signature, write a new module under `train.py` rather than editing `dflash/`.
-- Modify the evaluation harness. `evaluate_acceptance_length` in `prepare.py` is the ground-truth metric.
+- Modify `3rd-party/dflash/`. The vendored package is treated as read-only. If you want a different drafter forward signature, write a new module under `scripts/train.py` rather than editing `3rd-party/dflash/`.
+- Modify the evaluation harness. `evaluate_acceptance_length` in `src/prepare.py` is the ground-truth metric.
 - Install new packages or add dependencies. You can only use what's already in `pyproject.toml`.
 
 **The goal is simple: get the highest `accept_len`.** Note this is the opposite of the original autoresearch task — **higher is better**, since acceptance length measures how many of the drafter's parallel proposals the verifier (target) accepts in a row. Since the time budget is fixed, you don't need to worry about training time — it's always 5 minutes. Everything below the target/eval line is fair game.
@@ -103,24 +103,24 @@ The experiment runs on a dedicated branch (e.g. `autoresearch/mar5` or `autorese
 LOOP FOREVER:
 
 1. Look at the git state: the current branch/commit we're on
-2. Tune `train.py` with an experimental idea by directly hacking the code.
+2. Tune `scripts/train.py` with an experimental idea by directly hacking the code.
 3. git commit
-4. Run the experiment: `uv run train.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
+4. Run the experiment: `uv run scripts/train.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
 5. Read out the training results: `grep "^accept_len:\|^peak_vram_mb:" run.log`
 6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
-7. Run the end-to-end speedup benchmark: `uv run bench.py > bench.log 2>&1`. This loads the drafter checkpoint that `train.py` saved to `~/.cache/autoresearch/drafter.pt` and times spec-decoding vs naive autoregressive pi0-fast on val chunks. Read out the speedup: `grep "^speedup:" bench.log` (format: `1.50x`).
+7. Run the end-to-end speedup benchmark: `uv run scripts/bench.py > bench.log 2>&1`. This loads the drafter checkpoint that `scripts/train.py` saved to `~/.cache/autoresearch/drafter.pt` and times spec-decoding vs naive autoregressive pi0-fast on val chunks. Read out the speedup: `grep "^speedup:" bench.log` (format: `1.50x`).
 8. If bench crashes (drafter checkpoint missing, OOM, etc.), record `speedup` as `—` for the row but keep `accept_len` — the training metric is still primary.
 9. Record both `accept_len` and `speedup` in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git)
 10. **Keep/discard rule**: `accept_len` is the primary metric (higher better). `speedup` is the secondary signal — a higher `accept_len` that lowers `speedup` (e.g. a drafter so big it negates per-chunk savings) is a wash; advance only if `speedup` did not regress materially. If `accept_len` improved AND `speedup` did not regress, advance the branch. Otherwise reset.
 
 The idea is that you are a completely autonomous researcher trying things out. If they work, keep. If they don't, discard. And you're advancing the branch so that you can iterate. If you feel like you're getting stuck in some way, you can rewind but you should probably do this very very sparingly (if ever).
 
-**Timeout**: Each `train.py` invocation runs for **15 minutes** of training (wall clock, after first step), then ~1 minute of acceptance-length eval (16 val batches × 2). `bench.py` then takes another ~30s of decoding. If a run exceeds 25 minutes total, kill it and treat it as a failure (discard and revert).
+**Timeout**: Each `scripts/train.py` invocation runs for **15 minutes** of training (wall clock, after first step), then ~1 minute of acceptance-length eval (16 val batches × 2). `scripts/bench.py` then takes another ~30s of decoding. If a run exceeds 25 minutes total, kill it and treat it as a failure (discard and revert).
 
 **Crashes**: If a run crashes (OOM, or a bug, or etc.), use your judgment: If it's something dumb and easy to fix (e.g. a typo, a missing import), fix it and re-run. If the idea itself is fundamentally broken, just skip it, log "crash" as the status in the tsv, and move on.
 
 **Sanity checks for ideas that don't move `accept_len`**: Loss should be falling steadily over the 5-minute window — if it isn't, your LR / masking strategy is likely wrong, not the architecture. A drafter that overfits to one position in the block (e.g. only learns position 1) shows up as `accept_len` plateauing near 2.0; vary the masking schedule to fix it.
 
-**NEVER STOP**: Once the experiment loop has begun (after the initial setup), do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working *indefinitely* until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read the DFlash paper referenced in `dflash/README.md`, re-read the in-scope files for new angles, try combining previous near-misses, try more radical drafter architectures (different attention patterns, different conditioning, etc.). The loop runs until the human interrupts you, period.
+**NEVER STOP**: Once the experiment loop has begun (after the initial setup), do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working *indefinitely* until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read the DFlash paper referenced in `3rd-party/dflash/README.md`, re-read the in-scope files for new angles, try combining previous near-misses, try more radical drafter architectures (different attention patterns, different conditioning, etc.). The loop runs until the human interrupts you, period.
 
 As an example use case, a user might leave you running while they sleep. If each experiment takes you ~6 minutes (train + eval) then you can run approx 10/hour, for a total of about 80 over the duration of the average human sleep. The user then wakes up to experimental results, all completed by you while they slept!
