@@ -76,7 +76,7 @@ program.md           — autonomous-research procedure (see AGENT_GUIDE.md)
 
 ## Autonomous research
 
-The project was built to be driven by an autonomous coding agent that iterates on `scripts/train.py` in a tight train→bench→keep-or-revert loop. The headline result above is the artifact of ~30 such experiments on the `autoresearch/may1` branch — see `results.tsv` on that branch for the full log.
+The project was built to be driven by an autonomous coding agent that iterates on `scripts/train.py` in a tight train→bench→keep-or-revert loop. The headline result above is the artifact of ~30 such experiments. 
 
 If you want to run that loop yourself, read [AGENT_GUIDE.md](AGENT_GUIDE.md) and point Claude/Codex/your-agent at [program.md](program.md).
 
